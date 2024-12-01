@@ -2,15 +2,15 @@
 #include <fast_dynamic/motion_compensate_node.h>
 
 #include <gflags/gflags.h>
-#include <glog/logging.h>
+// #include <glog/logging.h>
 
 int main(int argc, char* argv[])
 {
-  google::InitGoogleLogging(argv[0]);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  google::InstallFailureSignalHandler();
-  FLAGS_alsologtostderr = true;
-  FLAGS_colorlogtostderr = true;
+  // google::InitGoogleLogging(argv[0]);
+  // google::ParseCommandLineFlags(&argc, &argv, true);
+  // google::InstallFailureSignalHandler();
+  // FLAGS_alsologtostderr = true;
+  // FLAGS_colorlogtostderr = true;
 
   ros::init(argc, argv, "motion_compensate");
 

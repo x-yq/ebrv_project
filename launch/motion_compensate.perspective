@@ -29,7 +29,7 @@
     "pluginmanager": {
       "keys": {
         "running-plugins": {
-          "repr": "{'rqt_image_view/ImageView': [1, 2, 3, 4, 5]}",
+          "repr": "{'rqt_image_view/ImageView': [1, 4, 5], 'rqt_plot/Plot':[1, 2]}",
           "type": "repr"
         }
       },
@@ -372,26 +372,90 @@
         "plugin__rqt_plot__Plot__1": {
           "keys": {},
           "groups": {
+            "dock_widget__DataPlotWidget": {
+              "keys": {
+                "dock_widget_title": {
+                  "repr": "'MatPlot'",
+                  "type": "repr"
+                },
+                "dockable": {
+                  "repr": "True",
+                  "type": "repr"
+                },
+                "parent": {
+                  "repr": "None",
+                  "type": "repr"
+                }
+              },
+              "groups": {}
+            },
             "plugin": {
               "keys": {
                 "autoscroll": {
-                  "repr": "'true'",
+                  "repr": "True",
                   "type": "repr"
                 },
                 "plot_type": {
-                  "repr": "'1'",
+                  "repr": "1",
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "''",
+                  "repr": "['/dvs/model/point/x', '/dvs/model/point/y', '/dvs/model/point/z']",
                   "type": "repr"
                 },
                 "x_limits": {
-                  "repr": "['0', '1']",
+                  "repr": "[-157064986.36774063, -157064985.36774063]",
                   "type": "repr"
                 },
                 "y_limits": {
-                  "repr": "['0', '1']",
+                  "repr": "[-300.1508360521998, 300.482041785300728]",
+                  "type": "repr"
+                }
+              },
+              "groups": {}
+            }
+          }
+        },
+        "plugin__rqt_plot__Plot__2": {
+          "keys": {},
+          "groups": {
+            "dock_widget__DataPlotWidget": {
+              "keys": {
+                "dock_widget_title": {
+                  "repr": "'MatPlot'",
+                  "type": "repr"
+                },
+                "dockable": {
+                  "repr": "True",
+                  "type": "repr"
+                },
+                "parent": {
+                  "repr": "None",
+                  "type": "repr"
+                }
+              },
+              "groups": {}
+            },
+            "plugin": {
+              "keys": {
+                "autoscroll": {
+                  "repr": "True",
+                  "type": "repr"
+                },
+                "plot_type": {
+                  "repr": "1",
+                  "type": "repr"
+                },
+                "topics": {
+                  "repr": "['/dvs/grad/point/x', '/dvs/grad/point/y', '/dvs/grad/point/z']",
+                  "type": "repr"
+                },
+                "x_limits": {
+                  "repr": "[-157064986.36774063, -157064985.36774063]",
+                  "type": "repr"
+                },
+                "y_limits": {
+                  "repr": "[-1.1508360521998, 1.482041785300728]",
                   "type": "repr"
                 }
               },

@@ -24,9 +24,10 @@ void minMaxLocRobust(const cv::Mat& image, float& rmin, float& rmax,
 /**
 * \brief Normalize image to the range [0,255] using robust min and max values
 */
-void normalize(const cv::Mat& src, const float& rmin_val, const float& rmax_val, cv::Mat& dst, const float& percentage_pixels_to_discard)
+void normalize(const cv::Mat& src, cv::Mat& dst, const float& percentage_pixels_to_discard)
 {
-  // minMaxLocRobust(src, rmin_val, rmax_val, percentage_pixels_to_discard);
+  float rmin_val, rmax_val;
+  minMaxLocRobust(src, rmin_val, rmax_val, percentage_pixels_to_discard);
   const float scale = ((rmax_val != rmin_val) ? 255.f / (rmax_val - rmin_val) : 1.f);
   cv::Mat state_image_normalized = scale * (src - rmin_val);
   state_image_normalized.convertTo(dst, CV_8UC1);
