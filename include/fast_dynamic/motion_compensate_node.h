@@ -18,69 +18,28 @@
 
 #include <kindr/minimal/quat-transformation.h>
 #include <image_geometry/pinhole_camera_model.h>
-// #include <fast_dynamic/minimizer.h>
+#include <fast_dynamic/image_util.h>
 
-// #include <dynamic_reconfigure/server.h>
-// #include <fast_dynamic/motion_compensateConfig.h>
+#include <filesystem>
+#include <chrono>
+#include <ctime>
 
 
 namespace motion_compensate
 {
 
 using Transformation = kindr::minimal::QuatTransformation;
-//using Transformation = kindr::minimal::RotationQuaternion;
 
 class MotionCompensate {
 public:
   MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_private);
   virtual ~MotionCompensate();
 
-  //   // Dynamic reconfigure
-  // void reconfigureCallback(motion_compensate::motion_compensateConfig &config, uint32_t level);
-  // boost::shared_ptr<dynamic_reconfigure::Server<motion_compensate::motion_compensateConfig>> server_;
-  // dynamic_reconfigure::Server<motion_compensate::motion_compensateConfig>::CallbackType dynamic_reconfigure_callback_;
-
-  struct Grad{
-    double dx, dy, dz, dth;  // Transformation parameters
-
-    // Default constructor
-    Grad() : dx(0.0), dy(0.0), dz(0.0), dth(0.0) {}
-
-    // Parameterized constructor
-    Grad(double dx, double dy, double dz, double dth) 
-        : dx(dx), dy(dy), dz(dz), dth(dth) {}
-
-    Grad& operator=(const Grad& other) {
-        if (this != &other) {  
-            dx = other.dx;
-            dy = other.dy;
-            dz = other.dz;
-            dth = other.dth;
-        }
-        return *this; 
-    }
-  };
-
-  struct Model {
-    double hx, hy, hz, htheta;  // Transformation parameters
-
-    // Default constructor
-    Model() : hx(0.0), hy(0.0), hz(0.0), htheta(0.0) {}
-
-    // Parameterized constructor
-    Model(double hx_, double hy_, double hz_, double htheta_) 
-        : hx(hx_), hy(hy_), hz(hz_), htheta(htheta_) {}
-
-    Model& operator=(const Model& other) {
-        if (this != &other) {  
-            hx = other.hx;
-            hy = other.hy;
-            hz = other.hz;
-            htheta = other.htheta;
-        }
-        return *this; 
-    }
-};
+double hx, hy, hz, htheta;
+double dx, dy, dz, dth;
+int img_width, img_height;
+int iter;
+double cx, cy;
 
 private:
   ros::NodeHandle nh_;   // Node handle used to subscribe to ROS topics
@@ -97,6 +56,7 @@ private:
   image_transport::Publisher avg_time_map_pub_;
   image_transport::Publisher mc_event_count_pub_;
   image_transport::Publisher mc_time_map_pub_;
+  image_transport::Publisher ground_mask_pub_;
   ros::Publisher model_pub_;
   ros::Publisher grad_pub_;
 
@@ -104,11 +64,17 @@ private:
   cv::Mat avg_time_map_;
   cv::Mat mc_event_count_;
   cv::Mat mc_time_map_;
+  cv::Mat ground_mask_;
+  cv::Mat foreground_mask, background_mask;
+  cv::Mat rho;
+  cv::Mat mc_event_count_pos_;
+  cv::Mat mc_event_count_neg_;
+
+  double duration;
 
   ros::Time t0;
- 
+
   void publishMap();
-  void publishModel(const Model& model, const Grad& grad);
   ros::Time time_packet_;
 
   std::deque<dvs_msgs::Event> events_;
@@ -121,28 +87,15 @@ private:
   double maxIterations;
   int idx_first_ev_map_;
 
-cv::Point2d warpEvent(
-  const Model& model,
-  const dvs_msgs::Event& event,
-  const double& t_ref
-);
-
-void computeImageOfWarpedEvents(
-  const Model& model,
-  const std::vector<dvs_msgs::Event>& events_subset,
-  const int width,
-  const int height,
-  cv::Mat* image_warped,
-  cv::Mat* image_event_count
-);
+std::vector<dvs_msgs::Event> computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset);
 
 double computeError(
-  const Model& modelPrev,
-  const Model& modelCurr
+  const double& l_hx,const double& l_hy,const double& l_hz,const double& l_hth
 );
 
-
 double lr_x, lr_y, lr_div, lr_rot;
+bool filter_small_compo, use_adam, enable_undistort;
+double initial_lr_x, initial_lr_y, initial_lr_div, initial_lr_rot = lr_rot;
 
 
 struct AdamParam {
@@ -169,7 +122,7 @@ struct AdamOptimizer {
     AdamParam param;
     double beta1, beta2, alpha;
 
-    AdamOptimizer(double beta1 = 0.9, double beta2 = 0.999, double alpha = 0.1)
+    AdamOptimizer(double beta1 = 0.9, double beta2 = 0.999, double alpha = 1.0)
         : beta1(beta1), beta2(beta2), alpha(alpha) {}
 
     void init(double m_init = 0.0, double v_init = 0.0, int t_init = 1) {
@@ -178,7 +131,7 @@ struct AdamOptimizer {
         param.t = t_init;
     }
 
-    double update(const double& grad) {
+    void update(const double& grad, double* scale) {
         param.m = beta1 * param.m + (1 - beta1) * grad;
         param.v = beta2 * param.v + (1 - beta2) * grad * grad;
 
@@ -187,34 +140,56 @@ struct AdamOptimizer {
 
         param.t += 1;
 
-        double scale = alpha * m_hat / (std::sqrt(v_hat) + 1e-7); 
+        *scale = alpha * m_hat / (std::sqrt(v_hat) + 1e-7);  
 
-        return scale;
     }
 };
+
+cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
+        199.0923665423112, 0.0, 132.1920713777002, 
+        0.0, 198.8288204700886, 110.7126600112956, 
+        0.0, 0.0, 1.0);
+cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << 
+        -0.3684363117977873, 0.1509472435566583, 
+        -0.0002961305343848646, -0.000759431726241032, 0.0);
+
+cv::Mat R = (cv::Mat_<double>(3,3) <<
+                    1.0, 0.0, 0.0, 
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0);
+
+cv::Mat P = (cv::Mat_<double>(3,4) <<
+            168.6294097900391, 0.0, 135.348079770296, 0.0, 
+            0.0, 178.5641784667969, 113.6189973794753, 0.0, 
+            0.0, 0.0, 1.0, 0.0);
+
+
 
 
 AdamOptimizer ap_x,ap_y,ap_div,ap_rot;
 
-bool updateDR = false;
+double lambda;
 
+double computeContrast(const cv::Mat& image);
 
-double computeError2(const cv::Mat& image, const cv::Mat& wp_image);
+void updateModel();
 
-void updateModel(const Model& pre, const Grad& grad,Model* cur, const double& contrast);
-
-void diffTimeImage(const cv::Mat &time_image, Grad* grad);
-
-void dZThetaUpdate(const cv::Mat &grad_x, const cv::Mat &grad_y, double &div_r, double &rot_r);
-
-void dXYUpdate(const cv::Mat &grad_x, const cv::Mat &grad_y, double &dx_val_r, double &dy_val_r);
+void diffTimeImage(const cv::Mat& image);
 
 double getDensity(const cv::Mat& event_count);
 
-void checkDirection(const Grad& old, const Grad& cur, Model* m);
+void printInfo(const double& error, const double& density);
 
-void printInfo(const Grad& grad, const Model& m, const double& error, const double& density);
+void detectMovingObjects(const cv::Mat& avg_time_map, 
+                        const cv::Mat& mc_time_map, 
+                        const double& dt,
+                        cv::Mat& background_mask, 
+                        cv::Mat& foreground_mask);
 
+void filterComponents(const cv::Mat& binary_image, cv::Mat& filtered_image, int min_area, float max_aspect_ratio);
+void plotHist(const cv::Mat& avg_image, const cv::Mat& mc_image);
+cv::Mat denoiseTimeMap(const cv::Mat &time_map, int n, int window_size);
+void saveMapsAsMultiChannels();
 
 };
 

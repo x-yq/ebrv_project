@@ -5,20 +5,28 @@
   <node name="my_rqt_dashboard" pkg="rqt_gui" type="rqt_gui" respawn="false" output="screen"
     args="--perspective-file $(find fast_dynamic)/launch/motion_compensate.perspective"/>
   
+  <!-- /home/x-yq/catkin_ws/bags/dynamic_6dof.bag -->
+  <!-- /home/x-yq/catkin_ws/bags/IROS_Dataset/what_is_background/background.bag -->
 
   <node pkg="rosbag" type="play" name="player" respawn="false"
-  args="-r 0.5 -d 1.0 -s 24.5 -l /home/x-yq/catkin_ws/bags/dynamic_6dof.bag"/>
+  args="-r 0.1 -d 1.0 -s 0.2 -l /home/x-yq/catkin_ws/bags/IROS_Dataset/what_is_background/background.bag"/>
 
 
   <!-- Publish PointStamped from PointStampedArray -->
   <node pkg="fast_dynamic" type="fast_dynamic" name="motion_compensate" output="screen" respawn="false">
-    <param name="num_events_map_update" value="50000" />
-    <param name="acc_threshold" value="0.00001" />
-    <param name="lr_x" value="1." />
-    <param name="lr_y" value="1." />
-    <param name="lr_div" value="0.001" />
-    <param name="lr_rot" value="0.001" />
-    <param name="tm_max_iter" value="1000" />
+    <param name="num_events_map_update" value="40000" />
+    <param name="acc_threshold" value="0.0001" />
+    <param name="lr_x" value="10." />
+    <param name="lr_y" value="10." />
+    <param name="lr_div" value="0.0001" />
+    <param name="lr_rot" value="0.0001" />
+    <param name="tm_max_iter" value="50000" />
+    <param name="filter_threshold" value="0.3" />
+
+    <param name="use_adam" value="false"/>
+    <param name="enable_undistort" value="false"/>
+    <param name="filter_small_compo" value="false"/>
+
     <remap from="events" to="/dvs/events" />
     <remap from="event_image" to="event_image" />
   </node>

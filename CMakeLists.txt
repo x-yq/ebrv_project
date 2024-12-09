@@ -261,8 +261,10 @@ catkin_simple(ALL_DEPS_REQUIRED)
 # pkg_check_modules( gsl REQUIRED gsl )
 
 find_package(OpenCV REQUIRED)
+# find_package(Ceres REQUIRED)
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O3")
+
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3")
 
 # Make the executable
 file(GLOB SOURCES src/*.cpp)
@@ -272,6 +274,7 @@ cs_add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(${PROJECT_NAME}
    ${catkin_LIBRARIES}
    ${OpenCV_LIBRARIES}
+  #  ${CERES_LIBRARIES}  # 链接 Ceres 库
   #  ${gsl_LIBRARIES}
 )
 

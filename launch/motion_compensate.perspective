@@ -29,7 +29,7 @@
     "pluginmanager": {
       "keys": {
         "running-plugins": {
-          "repr": "{'rqt_image_view/ImageView': [1, 4, 5], 'rqt_plot/Plot':[1, 2]}",
+          "repr": "{'rqt_image_view/ImageView': [1,2, 4, 5], 'rqt_plot/Plot':[]}",
           "type": "repr"
         }
       },
@@ -132,7 +132,7 @@
                   "type": "repr"
                 },
                 "mouse_pub_topic": {
-                  "repr": "'/event_count_mouse_left'",
+                  "repr": "'/mask_mouse_left'",
                   "type": "repr"
                 },
                 "num_gridlines": {
@@ -156,7 +156,7 @@
                   "type": "repr"
                 },
                 "topic": {
-                  "repr": "'/event_count'",
+                  "repr": "'/mask'",
                   "type": "repr"
                 },
                 "zoom1": {
