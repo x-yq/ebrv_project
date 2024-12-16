@@ -56,7 +56,7 @@ if ( mc_time_map_pub_.getNumSubscribers() > 0){
     image_util::normalize(image_stacked, normalized_stacked_image, 15.);
     cv::Mat denoised;
     cv::bilateralFilter(normalized_stacked_image, denoised, 9, 75, 75);
-    denoised = denoiseTimeMap(denoised, 6, 3);
+    denoised = denoiseTimeMap(denoised, 5, 3);
 
     denoised.copyTo(cv_image_time.image);
     mc_time_map_pub_.publish(cv_image_time.toImageMsg());

@@ -278,5 +278,14 @@ target_link_libraries(${PROJECT_NAME}
   #  ${gsl_LIBRARIES}
 )
 
+# # Add the include directory for cnpy
+include_directories(/home/x-yq/catkin_ws/src/cnpy)
+
+# If the library is installed in a non-standard directory, add the library path
+link_directories(/home/x-yq/catkin_ws/src/cnpy/build)
+
+# Link your project with the cnpy library
+target_link_libraries(${PROJECT_NAME} cnpy)
+
 cs_install()
 cs_export()

@@ -69,6 +69,8 @@ private:
   cv::Mat rho;
   cv::Mat mc_event_count_pos_;
   cv::Mat mc_event_count_neg_;
+  cv::Mat mc_time_map_pos_;
+  cv::Mat mc_time_map_neg_;
 
   double duration;
 
@@ -87,14 +89,20 @@ private:
   double maxIterations;
   int idx_first_ev_map_;
 
-std::vector<dvs_msgs::Event> computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset);
+void findInitialFlow(const std::vector<dvs_msgs::Event>& events_subset);
+std::array<double, 4> findBestFlowInRangeBruteForce(const std::vector<dvs_msgs::Event>& events_subset, 
+                                                                    const std::array<double, 8>& param_range, double step_xy, double step_zth);
+
+double contrast_f_numerical(const std::vector<dvs_msgs::Event>& events_subset, const double hx_, const double hy_, const double hz_, const double hth_);
+
+cv::Mat computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset, double hx_, double hy_, double hz_, double hth_);
 
 double computeError(
   const double& l_hx,const double& l_hy,const double& l_hz,const double& l_hth
 );
 
 double lr_x, lr_y, lr_div, lr_rot;
-bool filter_small_compo, use_adam, enable_undistort;
+bool filter_small_compo, use_adam, enable_undistort, save_frames;
 double initial_lr_x, initial_lr_y, initial_lr_div, initial_lr_rot = lr_rot;
 
 
@@ -176,9 +184,9 @@ void updateModel();
 
 void diffTimeImage(const cv::Mat& image);
 
-double getDensity(const cv::Mat& event_count);
+double getDensity(const cv::Mat& event_count, double threshold);
 
-void printInfo(const double& error, const double& density);
+void printInfo(const double& error, const double& contrast, const double& density);
 
 void detectMovingObjects(const cv::Mat& avg_time_map, 
                         const cv::Mat& mc_time_map, 

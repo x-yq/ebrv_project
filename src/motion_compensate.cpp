@@ -30,6 +30,8 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   nh_private.param<bool>("filter_small_compo", filter_small_compo, false);
   nh_private.param<bool>("use_adam", use_adam, false);
   nh_private.param<bool>("enable_undistort", enable_undistort, false);
+  nh_private.param<bool>("save_frames", save_frames, false);
+
 
 
   // set queue_size to 0 to avoid discarding messages (for correctness).
@@ -67,10 +69,8 @@ MotionCompensate::~MotionCompensate()
 
 void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 {
-  // Append events of current message to the queue
-  // std::cout << "Received an EventArray message with " << msg->events.size() << std::endl;
-
   static unsigned int packet_number = 0;
+  static unsigned int slice_number = 0;
   static unsigned long total_event_count = 0;
 
   if (packet_number == 0)
@@ -98,8 +98,6 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
     this->lr_div = initial_lr_div;
     this->lr_rot = initial_lr_rot;
 
-    this->hx = this->hy = this->hz = this->htheta = 0.;
-
     this->avg_time_map_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->mc_time_map_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->event_count_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
@@ -112,7 +110,7 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
     /***
      * Get the average time map and event count map
     */
-    ROS_WARN("-----------------AVG TIME MAP AND COUNT MAP-------------------");
+    ROS_WARN("-------------AVG TIME MAP AND COUNT MAP---------------");
 
     std::vector<dvs_msgs::Event> events_subset_;
 
@@ -142,23 +140,32 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
     const double slice_first_t = events_subset_.front().ts.toSec();
 
     for(const auto& event: events_subset_){
-      event_count_.at<double>(event.y, event.x) += 1.0;
-      avg_time_map_.at<double>(event.y, event.x) += (event.ts.toSec() - slice_first_t);
+      this->event_count_.at<double>(event.y, event.x) += 1.0;
+      this->avg_time_map_.at<double>(event.y, event.x) += (event.ts.toSec() - slice_first_t);
     }
 
     for (int y = 0; y < img_height; y+=1) {
         for (int x = 0; x < img_width; x+=1) {
           float count = event_count_.at<double>(y, x);
           if(count < 1.) continue;
-          avg_time_map_.at<double>(y, x) /= count;
+          this->avg_time_map_.at<double>(y, x) /= count;
         }
     }
+
+
+    if (slice_number == 0){
+      findInitialFlow(events_subset_);
+    }
+    slice_number++;
+
+    ROS_WARN("################slice %d##################", slice_number);
+    printInfo(0.,0.,0.);
 
 
     /***
      * Timestamp Minimizer
     */
-     ROS_WARN("-----------------TIME MAP MINIMIZER-------------------");
+     ROS_WARN("-------------TIME MAP MINIMIZER---------------");
 
     this->iter = 0;
     ap_x.init();
@@ -166,17 +173,33 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
     ap_rot.init();
     ap_div.init();
 
-
-    computeImageOfWarpedEvents(events_subset_);
+    computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
     diffTimeImage(this->mc_time_map_);
     updateModel();
+    double l_density = getDensity(this->mc_time_map_, 0.1);
+    double cur_density;
 
     while (true) {
+
+      // if(std::abs(this->lr_x*this->dx) < 1e-4 && std::abs(this->lr_y*this->dy) < 1e-4 &&
+      //    std::abs(this->lr_div*this->dz) < 1e-3 && std::abs(this->lr_rot*this->dth) < 1e-1){
+      //   ROS_WARN("Error converged after %d", iter);
+      //   printInfo(0.,computeContrast(this->mc_time_map_), 0.);
+      //   break;
+      //   }
 
         double old_dx = this->dx, old_dy = this->dy, old_dz = this->dz, old_dth = this->dth;
         double l_hx = this->hx, l_hy = this->hy, l_hz = this->hz, l_hth = this->htheta;
 
-        computeImageOfWarpedEvents(events_subset_);
+        computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
+
+        cur_density = getDensity(this->mc_time_map_, 0.1);
+        if(std::abs(cur_density-l_density) < 1e-6){
+          ROS_WARN("Density converged after %d", iter);
+          printInfo(0.,computeContrast(this->mc_time_map_), cur_density);
+          break;
+        }
+        l_density = cur_density;
 
         diffTimeImage(this->mc_time_map_);
 
@@ -189,35 +212,34 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 
         if(computeError(l_hx, l_hy, l_hz, l_hth) < acc_threshold_){
           ROS_WARN("Error converged after %d", iter);
-          printInfo(computeError(l_hx, l_hy, l_hz, l_hth),0.);
+          printInfo(computeError(l_hx, l_hy, l_hz, l_hth),computeContrast(this->mc_time_map_),0.);
           break;
         }
+
       
         this->iter+=1;
 
         if (this->iter > this->maxIterations){
           ROS_WARN("Reached max iterations %d", this->iter);
-          printInfo(0., 0.);
+          printInfo(computeError(l_hx, l_hy, l_hz, l_hth), computeContrast(this->mc_time_map_), 0.);
           break;
         }
 
     }
     
-    // publishMap();
-    // plotHist(this->avg_time_map_, this->mc_time_map_);
 
    /*
    
    Event count minimizer
    
    */
-  ROS_WARN("-----------------EVENT COUNT MINIMIZER-------------------");
+  ROS_WARN("-------------EVENT COUNT MINIMIZER---------------");
 
     double D_prime, D;
 
     cv::Mat mc_time_map_temp;
 
-    D = getDensity(mc_event_count_);
+    D = getDensity(mc_event_count_, 1.);
 
     D_prime = 0.;
     this->iter = 0;
@@ -230,7 +252,7 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
     while (true) {
       if(std::abs(D - D_prime) < 1e-8){
           ROS_WARN("Density converged after %d", iter);
-          printInfo(0., D);
+          printInfo(0.,computeContrast(this->mc_time_map_), D);
           break;
       }
 
@@ -245,13 +267,13 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
       for (int i = 0; i < 4; ++i) {
 
           *model_temp_params[i] = *model_params[i] + lrs[i] * deltas[i];
-          computeImageOfWarpedEvents(events_subset_);
+          computeImageOfWarpedEvents(events_subset_, hx_temp, hy_temp, hz_temp, htheta_temp);
 
-          D_prime = getDensity(this->mc_event_count_);
+          D_prime = getDensity(this->mc_event_count_, 1.);
 
           if (D_prime > D) {
             *model_params[i] += lrs[i] * deltas[i];
-            computeImageOfWarpedEvents(events_subset_);
+            computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
           }
           else {
             *model_temp_params[i] = *model_params[i] - lrs[i] * deltas[i];
@@ -262,13 +284,13 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 
       if (this->iter > maxIterations){
         ROS_WARN("Reached max iterations %d", iter);
-        printInfo(0., D);
+        printInfo(0., computeContrast(this->mc_time_map_), D);
         break;
       }
 
     }
 
-    ROS_WARN("-----------------OBJECT DETECTION-------------------");
+    ROS_WARN("-------------OBJECT DETECTION---------------");
     
     
     duration = events_subset_.back().ts.toSec() - events_subset_.front().ts.toSec();
@@ -277,9 +299,9 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 
     cv::hconcat(this->foreground_mask, this->background_mask, this->ground_mask_);
 
-    saveMapsAsMultiChannels();
+    if(save_frames) saveMapsAsMultiChannels();
     publishMap();
-    plotHist(this->avg_time_map_, this->mc_time_map_);
+    // plotHist(this->avg_time_map_, this->mc_time_map_);
 
     // Slide
     if ( num_events_map_update_ <= events_.size() )
