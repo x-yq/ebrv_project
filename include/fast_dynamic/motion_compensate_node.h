@@ -24,6 +24,11 @@
 #include <chrono>
 #include <ctime>
 
+#include <string>
+#include <rosbag/bag.h>
+#include <rosbag/view.h>
+#include <mutex>
+
 
 namespace motion_compensate
 {
@@ -45,11 +50,24 @@ private:
   ros::NodeHandle nh_;   // Node handle used to subscribe to ROS topics
   ros::NodeHandle pnh_;  // Private node handle for reading parameters
 
+  int packet_number;
+  int slice_number;
+  long total_event_count;
+  long total_depth_map_count;
+
   // Callback functions
+//   void callback(const dvs_msgs::EventArray::ConstPtr& msg);
   void eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg);
+  void depthCallback(const sensor_msgs::ImageConstPtr& depth_msg = nullptr);
+  void checkAndProcess();
+  void processMessages();
+
+  int expected_events_msg_ = 0, expected_depth_msg_ = 0;
+  int total_events_msg_size_ = 0, total_depth_msg_size_ = 0;
 
   // Subscribers
   ros::Subscriber event_sub_;
+  ros::Subscriber depth_image_sub_;
 
   // Publishers
   image_transport::Publisher event_count_pub_;
@@ -64,6 +82,7 @@ private:
   cv::Mat avg_time_map_;
   cv::Mat mc_event_count_;
   cv::Mat mc_time_map_;
+  cv::Mat depth_image_;
   cv::Mat ground_mask_;
   cv::Mat foreground_mask, background_mask;
   cv::Mat rho;
@@ -80,8 +99,11 @@ private:
   ros::Time time_packet_;
 
   std::deque<dvs_msgs::Event> events_;
+  std::deque<cv::Mat> depth_maps_;
+  std::deque<double> depth_map_timestamps;
   std::vector<dvs_msgs::Event> events_subset_temp;
 
+  std::mutex buffer_mutex_;
 
   double discretization_;
   double acc_threshold_;
@@ -95,15 +117,19 @@ std::array<double, 4> findBestFlowInRangeBruteForce(const std::vector<dvs_msgs::
 
 double contrast_f_numerical(const std::vector<dvs_msgs::Event>& events_subset, const double hx_, const double hy_, const double hz_, const double hth_);
 
+double getDiversion(double time, double x, double y);
+double calculateAverageDiv(const std::vector<dvs_msgs::Event>& events_subset);
+
 cv::Mat computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset, double hx_, double hy_, double hz_, double hth_);
 
 double computeError(
   const double& l_hx,const double& l_hy,const double& l_hz,const double& l_hth
 );
 
+std::string bag_args;
 double lr_x, lr_y, lr_div, lr_rot;
-bool filter_small_compo, use_adam, enable_undistort, save_frames;
-double initial_lr_x, initial_lr_y, initial_lr_div, initial_lr_rot = lr_rot;
+bool filter_small_compo, use_adam, enable_undistort, save_frames, plot_hist, better_initial, enable_depth, depth_image_received = false;
+double initial_lr_x, initial_lr_y, initial_lr_div, initial_lr_rot;
 
 
 struct AdamParam {
@@ -153,25 +179,43 @@ struct AdamOptimizer {
     }
 };
 
-cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
-        199.0923665423112, 0.0, 132.1920713777002, 
-        0.0, 198.8288204700886, 110.7126600112956, 
-        0.0, 0.0, 1.0);
-cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << 
-        -0.3684363117977873, 0.1509472435566583, 
-        -0.0002961305343848646, -0.000759431726241032, 0.0);
+const cv::Mat K_depth = (cv::Mat_<double>(3, 3) <<  385.7481384277344, 0.0, 319.36944580078125, 
+                                            0.0, 385.7481384277344, 238.4856414794922, 
+                                            0.0, 0.0, 1.0);
 
-cv::Mat R = (cv::Mat_<double>(3,3) <<
+// const cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
+//         199.0923665423112, 0.0, 132.1920713777002, 
+//         0.0, 198.8288204700886, 110.7126600112956, 
+//         0.0, 0.0, 1.0);
+
+// const cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << 
+//         -0.3684363117977873, 0.1509472435566583, 
+//         -0.0002961305343848646, -0.000759431726241032, 0.0);
+
+// const cv::Mat R = (cv::Mat_<double>(3,3) <<
+//                     1.0, 0.0, 0.0, 
+//                     0.0, 1.0, 0.0,
+//                     0.0, 0.0, 1.0);
+// const cv::Mat P = (cv::Mat_<double>(3,4) <<
+//             168.6294097900391, 0.0, 135.348079770296, 0.0, 
+//             0.0, 178.5641784667969, 113.6189973794753, 0.0, 
+//             0.0, 0.0, 1.0, 0.0);
+
+const cv::Mat cameraMatrix = (cv::Mat_<float>(3, 3) << 
+        5.3633325932983780e+02, 0, 3.2090009280822994e+02, 
+        0, 5.3631797700847164e+02, 2.3404853514480661e+02, 
+        0, 0, 1);
+
+const cv::Mat distCoeffs = (cv::Mat_<float>(5, 1) << 0, 0, 0, 0, 0);
+
+const cv::Mat R = (cv::Mat_<double>(3,3) <<
                     1.0, 0.0, 0.0, 
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0);
-
-cv::Mat P = (cv::Mat_<double>(3,4) <<
-            168.6294097900391, 0.0, 135.348079770296, 0.0, 
-            0.0, 178.5641784667969, 113.6189973794753, 0.0, 
+const cv::Mat P = (cv::Mat_<double>(3,4) <<
+            5.3633325932983780e+02, 0.0, 3.2090009280822994e+02, 0.0, 
+            0.0, 5.3631797700847164e+02, 2.3404853514480661e+02, 0.0, 
             0.0, 0.0, 1.0, 0.0);
-
-
 
 
 AdamOptimizer ap_x,ap_y,ap_div,ap_rot;

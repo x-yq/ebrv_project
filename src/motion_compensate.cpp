@@ -31,11 +31,83 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   nh_private.param<bool>("use_adam", use_adam, false);
   nh_private.param<bool>("enable_undistort", enable_undistort, false);
   nh_private.param<bool>("save_frames", save_frames, false);
-
+  nh_private.param<bool>("plot_hist", plot_hist, false);
+  nh_private.param<bool>("better_initial", better_initial, false);
+  nh_private.param<bool>("enable_depth", enable_depth, false);
+  nh_private.param<std::string>("bag_args", bag_args, "");
 
 
   // set queue_size to 0 to avoid discarding messages (for correctness).
-  event_sub_ = nh_.subscribe("events", 0, &MotionCompensate::eventsCallback, this);
+  if(enable_depth){
+
+    event_sub_ = nh_.subscribe("events", 0, &MotionCompensate::eventsCallback, this);
+    depth_image_sub_ = nh_.subscribe("depth_image", 0, &MotionCompensate::depthCallback, this);
+
+    //get expected msg number...
+
+    std::string events_topic = "/dvs/events";
+    std::string depth_topic = "/camera/depth/image_rect_raw";
+
+    std::istringstream stream(bag_args);
+    std::string token;
+
+    double start_time = 0.0;
+    double duration = 0.0;
+    std::string bag_path;
+
+    while (stream >> token) {
+        if (token == "-r") {
+            continue;
+        } else if(token == "-d"){
+            continue;
+        } else if(token == "--pause"){
+            continue;
+        } else if (token == "--duration") {
+            stream >> duration;
+        } else if (token == "-s") {
+            stream >> start_time;
+        } else {
+            bag_path = token;
+        }
+    }
+
+    rosbag::Bag bag;
+    try {
+        bag.open(bag_path, rosbag::bagmode::Read);
+    } catch (const std::exception& e) {
+        ROS_ERROR("Failed to open bag file: %s", e.what());
+    }
+
+    std::vector<std::string> topics = {events_topic, depth_topic};
+
+    rosbag::View view(bag, rosbag::TopicQuery(topics));
+
+    ros::Time start_time_ = ros::Time(start_time + view.begin()->getTime().toSec());
+    ros::Time end_time_ = ros::Time(start_time + view.begin()->getTime().toSec() + duration);
+
+    if(duration == 0.){
+      end_time_ = ros::TIME_MAX;
+    }
+
+    for (const rosbag::MessageInstance& m : view) {
+        if (m.getTopic() == events_topic) {
+          if(m.getTime() >= start_time_ && m.getTime() <= end_time_)
+            expected_events_msg_++;
+        } else if (m.getTopic() == depth_topic) {
+          if(m.getTime() >= start_time_ && m.getTime() <= end_time_)
+            expected_depth_msg_++;
+        }
+    }
+
+    ROS_INFO("Topic '%s' has %d messages.", events_topic.c_str(), expected_events_msg_);
+    ROS_INFO("Topic '%s' has %d messages.", depth_topic.c_str(), expected_depth_msg_);
+
+    bag.close();
+
+  }
+  else{
+    event_sub_ = nh_.subscribe("events", 0, &MotionCompensate::eventsCallback, this);
+  }
 
   // Set up publishers
   image_transport::ImageTransport it_(nh_);
@@ -53,6 +125,11 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   idx_first_ev_map_ = 0;   // Index of first event of processing window
   time_packet_ = ros::Time(0);
 
+  packet_number = 0;
+  slice_number = 0;
+  total_event_count = 0;
+  total_depth_map_count = 0;
+
 }
 
 
@@ -67,11 +144,21 @@ MotionCompensate::~MotionCompensate()
 
 }
 
+void MotionCompensate::depthCallback(const sensor_msgs::ImageConstPtr& depth_msg){
+
+  std::lock_guard<std::mutex> lock(buffer_mutex_);
+  cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
+  cv::Mat depth_image = cv_ptr->image;
+  depth_maps_.push_back(depth_image);
+  total_depth_msg_size_ ++;
+
+  checkAndProcess();
+  
+}
+
 void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 {
-  static unsigned int packet_number = 0;
-  static unsigned int slice_number = 0;
-  static unsigned long total_event_count = 0;
+  std::lock_guard<std::mutex> lock(buffer_mutex_);
 
   if (packet_number == 0)
   {
@@ -86,10 +173,34 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
   packet_number++;
 
   for(const dvs_msgs::Event& ev : msg->events) events_.push_back(ev);
-
   total_event_count += msg->events.size();
+  // std::cout << "size of image " << img_width << " " << img_height << std::endl;
 
-  std::cout << "size of image " << img_width << " " << img_height << std::endl;
+  total_events_msg_size_ ++;
+
+  checkAndProcess();
+
+}
+
+
+void MotionCompensate::checkAndProcess(){
+  if(enable_depth && total_events_msg_size_ >= expected_events_msg_ && total_depth_msg_size_ >= expected_depth_msg_){
+        ROS_INFO("All messages received, starting processing...");
+
+        double interval = (events_.back().ts.toSec() - events_.front().ts.toSec()) / depth_maps_.size();
+        for (size_t i = 0; i < depth_maps_.size(); ++i) {
+            double timestamp = (i + 1) * interval; 
+            depth_map_timestamps.push_back(timestamp); 
+        }
+
+        processMessages();
+  }else if(!enable_depth){
+    processMessages();
+  }
+
+}
+
+void MotionCompensate::processMessages() {
 
   while (idx_first_ev_map_ + num_events_map_update_ <= events_.size())
   {
@@ -144,17 +255,15 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
       this->avg_time_map_.at<double>(event.y, event.x) += (event.ts.toSec() - slice_first_t);
     }
 
-    for (int y = 0; y < img_height; y+=1) {
-        for (int x = 0; x < img_width; x+=1) {
-          float count = event_count_.at<double>(y, x);
-          if(count < 1.) continue;
-          this->avg_time_map_.at<double>(y, x) /= count;
-        }
-    }
+
+    cv::Mat invalid_mask = this->event_count_ < 1.0;
+    this->avg_time_map_.setTo(0.0, invalid_mask);
+    this->event_count_.setTo(0.000001, invalid_mask);
+    this->avg_time_map_ = this->avg_time_map_.mul(1.0 / this->event_count_);
 
 
     if (slice_number == 0){
-      findInitialFlow(events_subset_);
+      if(better_initial) findInitialFlow(events_subset_);
     }
     slice_number++;
 
@@ -181,23 +290,25 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 
     while (true) {
 
-      // if(std::abs(this->lr_x*this->dx) < 1e-4 && std::abs(this->lr_y*this->dy) < 1e-4 &&
-      //    std::abs(this->lr_div*this->dz) < 1e-3 && std::abs(this->lr_rot*this->dth) < 1e-1){
-      //   ROS_WARN("Error converged after %d", iter);
-      //   printInfo(0.,computeContrast(this->mc_time_map_), 0.);
-      //   break;
-      //   }
+      if(std::abs(this->lr_x*this->dx) < 1e-4 && std::abs(this->lr_y*this->dy) < 1e-4 &&
+          std::abs(this->lr_rot*this->dth) < 1e-1){ // && std::abs(this->lr_div*this->dz) < 1e-3){
+        ROS_WARN("Error converged after %d", iter);
+        printInfo(0.,computeContrast(this->mc_time_map_), 0.);
+        break;
+        }
 
         double old_dx = this->dx, old_dy = this->dy, old_dz = this->dz, old_dth = this->dth;
         double l_hx = this->hx, l_hy = this->hy, l_hz = this->hz, l_hth = this->htheta;
 
         computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
-
+        
         cur_density = getDensity(this->mc_time_map_, 0.1);
-        if(std::abs(cur_density-l_density) < 1e-6){
-          ROS_WARN("Density converged after %d", iter);
-          printInfo(0.,computeContrast(this->mc_time_map_), cur_density);
-          break;
+        if(slice_number > 1.){
+          if(std::abs(cur_density-l_density) < 1e-6){
+            ROS_WARN("Density converged after %d", iter);
+            printInfo(0.,computeContrast(this->mc_time_map_), cur_density);
+            break;
+          }
         }
         l_density = cur_density;
 
@@ -210,12 +321,11 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
         if (this->dz * old_dz < 0)   this->lr_rot *= 0.9;
         if (this->dth * old_dth < 0) this->lr_div *= 0.9;
 
-        if(computeError(l_hx, l_hy, l_hz, l_hth) < acc_threshold_){
-          ROS_WARN("Error converged after %d", iter);
-          printInfo(computeError(l_hx, l_hy, l_hz, l_hth),computeContrast(this->mc_time_map_),0.);
-          break;
-        }
-
+        // if(computeError(l_hx, l_hy, l_hz, l_hth) < acc_threshold_){
+        //   ROS_WARN("Error converged after %d", iter);
+        //   printInfo(computeError(l_hx, l_hy, l_hz, l_hth),computeContrast(this->mc_time_map_),0.);
+        //   break;
+        // }
       
         this->iter+=1;
 
@@ -265,6 +375,7 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
       double* model_temp_params[] = {&hx_temp, &hy_temp, &hz_temp, &htheta_temp};
 
       for (int i = 0; i < 4; ++i) {
+        if(enable_depth && i == 2) continue;
 
           *model_temp_params[i] = *model_params[i] + lrs[i] * deltas[i];
           computeImageOfWarpedEvents(events_subset_, hx_temp, hy_temp, hz_temp, htheta_temp);
@@ -290,6 +401,8 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 
     }
 
+    // computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
+
     ROS_WARN("-------------OBJECT DETECTION---------------");
     
     
@@ -299,9 +412,9 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 
     cv::hconcat(this->foreground_mask, this->background_mask, this->ground_mask_);
 
-    if(save_frames) saveMapsAsMultiChannels();
     publishMap();
-    // plotHist(this->avg_time_map_, this->mc_time_map_);
+    if(save_frames) saveMapsAsMultiChannels();
+    if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
 
     // Slide
     if ( num_events_map_update_ <= events_.size() )
@@ -316,6 +429,5 @@ void MotionCompensate::eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg)
   }
 
 }
-
 
 }

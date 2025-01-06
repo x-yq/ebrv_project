@@ -25,8 +25,8 @@ void MotionCompensate::findInitialFlow(const std::vector<dvs_msgs::Event>& event
 {
   // Hierarchical search to find a good initial flow
   double hx_temp = 0.0, hy_temp = 0.0, hz_temp = 0.0, hth_temp = 0.0;
-  std::vector<double> xy_steps = {400., 200., 100., 50., 25.};
-  std::vector<double> zth_steps = {0.016, 0.008, 0.004, 0.002, 0.001};
+  std::vector<double> xy_steps = {300., 200., 100., 50., 25.};
+  std::vector<double> zth_steps = {0.1, 0.06, 0.02, 0.01, 0.005};
 
 
   for (size_t i = 1; i < xy_steps.size(); ++i)
@@ -74,9 +74,23 @@ std::array<double, 4> MotionCompensate::findBestFlowInRangeBruteForce(const std:
   {
     for (double hy_ = hy_min; hy_ <= hy_max; hy_ += step_xy)
     {
-      for (double hz_ = hz_min; hz_ <= hz_max; hz_ += step_zth)
+
+      for (double hth_ = hth_min; hth_ <= hth_max; hth_ += step_zth)
       {
-        for (double hth_ = hth_min; hth_ <= hth_max; hth_ += step_zth)
+        // if(enable_depth){
+        //   double cost = contrast_f_numerical(events_subset, hx_, hy_, 0., hth_);
+        //   if (cost < minimum_cost)
+        //   {
+        //     minimum_cost = cost;
+        //     opt_hx = hx_;
+        //     opt_hy = hy_;
+        //     opt_hz = 0.;
+        //     opt_hth = hth_;
+        //   }
+        //   continue;
+        // }
+        
+        for (double hz_ = hz_min; hz_ <= hz_max; hz_ += step_zth)
         {
           double cost = contrast_f_numerical(events_subset, hx_, hy_, hz_, hth_);
 
@@ -93,7 +107,7 @@ std::array<double, 4> MotionCompensate::findBestFlowInRangeBruteForce(const std:
 
             // cv::Mat image_warped = computeImageOfWarpedEvents(events_subset, opt_hx, opt_hy, opt_hz, opt_hth); 
             // cv::normalize(image_warped, image_warped, 0., 1., cv::NORM_MINMAX);
-            // image_warped.convertTo(image_warped, CV_32FC1);
+            // image_warped.convertTo(image_warped, CV_64FC1);
             // cv::imshow("MC Initial", image_warped);
             // cv::waitKey(0);
           }
@@ -116,6 +130,100 @@ double MotionCompensate::contrast_f_numerical(const std::vector<dvs_msgs::Event>
   return -contrast; 
 }
 
+double MotionCompensate::getDiversion(double time, double x, double y)
+{
+    // Ensure timestamps and depth maps have the same size
+    if (depth_maps_.size() != depth_map_timestamps.size())
+    {
+        std::cerr << "Error: Size of timestamps and data must be the same!" << std::endl;
+        return -1;
+    }
+
+    size_t index = 0;
+    for (size_t i = 0; i < depth_map_timestamps.size(); ++i)
+    {
+        if (depth_map_timestamps[i] > time)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    cv::Mat depth_map = depth_maps_[index];
+
+    if (x < 1 || x >= depth_map.cols - 1 || y < 1 || y >= depth_map.rows - 1)
+    {
+        return 0.;
+    }
+
+    // Correct the depth value based on intrinsic parameters
+    double fx = K_depth.at<double>(0, 0);
+    double fy = K_depth.at<double>(1, 1);
+    double cxx = K_depth.at<double>(0, 2);
+    double cyy = K_depth.at<double>(1, 2);
+
+    double total_divergence = 0.0;
+    int valid_points = 0;
+
+    // Iterate over the 3x3 neighborhood
+    for (int dy = -1; dy <= 1; ++dy)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            if (dx == 0 && dy == 0) continue; // Skip the center point
+
+            int nx = x + dx;
+            int ny = y + dy;
+
+            double z_center = depth_map.at<float>(y, x) / 1000.0;
+            double z_neighbor = depth_map.at<float>(ny, nx) / 1000.0;
+
+            // Skip invalid or zero depth values
+            if (z_center <= 0.0 || z_neighbor <= 0.0)
+                continue;
+
+            // Calculate 3D coordinates for center and neighbor
+            double X_center = (x - cxx) * z_center / fx;
+            double Y_center = (y - cyy) * z_center / fy;
+
+            double X_neighbor = (nx - cxx) * z_neighbor / fx;
+            double Y_neighbor = (ny - cyy) * z_neighbor / fy;
+
+            // Calculate divergence for this pair
+            double div_x = X_neighbor - X_center;
+            double div_y = Y_neighbor - Y_center;
+
+            total_divergence += div_x + div_y;
+            valid_points++;
+        }
+    }
+
+    if (valid_points == 0)
+        return 0.0;
+
+    return total_divergence / valid_points;
+}
+
+double MotionCompensate::calculateAverageDiv(const std::vector<dvs_msgs::Event>& events_subset) {
+    double totalDivergence = 0.0;
+    int validCount = 0;
+
+    for (const auto& ev : events_subset) {
+        double divergence = getDiversion(ev.ts.toSec(), ev.x, ev.y);
+        if (divergence != 0.0) {
+            totalDivergence += divergence;
+            validCount++;
+        }
+
+        std::cout<< totalDivergence << std::endl;
+    }
+
+    if (validCount == 0) {
+        return 0.0;
+    }
+
+    return totalDivergence / validCount;
+}
 
 cv::Mat MotionCompensate::computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset, double hx_, double hy_, double hz_, double hth_)
 {
@@ -133,6 +241,7 @@ cv::Mat MotionCompensate::computeImageOfWarpedEvents(const std::vector<dvs_msgs:
 
   for (const dvs_msgs::Event& ev : events_subset)
   {
+
     double w_x, w_y;
     double xx = ev.x;
     double yy = ev.y;
@@ -143,6 +252,14 @@ cv::Mat MotionCompensate::computeImageOfWarpedEvents(const std::vector<dvs_msgs:
 
     double rotX = cosTheta * xx - sinTheta * yy;
     double rotY = sinTheta * xx + cosTheta * yy;
+
+    w_x = xx + dt * hx_;
+    w_y = xx + dt * hx_;
+
+    if(enable_depth){
+      hz_ = getDiversion(ev.ts.toSec(), w_x, w_y);
+      this->hz = hz_;
+    }
 
     w_x = xx + dt * (hx_ + (hz_ + 1) * rotX - xx);
     w_y = yy + dt * (hy_ + (hz_ + 1) * rotY - yy);
@@ -162,33 +279,11 @@ cv::Mat MotionCompensate::computeImageOfWarpedEvents(const std::vector<dvs_msgs:
     }
   }
 
-  for (int y = 0.; y < this->img_height; y+=1.) {
-    for (int x = 0.; x < this->img_width; x+=1.) {
-      double count = mc_event_count_.at<double>(y, x);
-      if(count >= 1.){
-        this->mc_time_map_.at<double>(y, x) /= this->mc_event_count_.at<double>(y, x);
-      }
-      else{
-        this->mc_time_map_.at<double>(y, x) = 0.;
-      }
-
-      if(this->mc_event_count_pos_.at<double>(y, x) >= 1.){
-        this->mc_time_map_pos_.at<double>(y, x) /= this->mc_event_count_pos_.at<double>(y, x);
-      }
-      else{
-        this->mc_time_map_pos_.at<double>(y, x) = 0.;
-      }
-
-      if(this->mc_event_count_neg_.at<double>(y, x) >= 1.){
-        this->mc_time_map_neg_.at<double>(y, x) /= this->mc_event_count_neg_.at<double>(y, x);
-      }
-      else{
-        this->mc_time_map_neg_.at<double>(y, x) = 0.;
-      }
-      
-    }
-
-}
+  cv::Mat invalid_mask = this->mc_event_count_ < 1.0;
+  this->mc_time_map_.setTo(0.0, invalid_mask);
+  this->mc_event_count_.setTo(0.000001, invalid_mask);
+  this->mc_time_map_ = this->mc_time_map_.mul(1.0 / this->mc_event_count_);
+  this->mc_time_map_.setTo(0.0, invalid_mask);
 
   return this->mc_event_count_;
 
@@ -221,8 +316,8 @@ double MotionCompensate::computeError(const double& l_hx,const double& l_hy,cons
 void MotionCompensate::updateModel(){
 
   this->hx += this->lr_x * this->dx;
-  this->hy += this->lr_y * this->dy;  
-  this->hz += this->lr_div * this->dz;
+  this->hy += this->lr_y * this->dy; 
+  if(!enable_depth) this->hz += this->lr_div * this->dz;
   this->htheta += this->lr_rot * this->dth;
 
 }
@@ -238,6 +333,8 @@ void MotionCompensate::diffTimeImage(const cv::Mat& image){
 
     int cnt = 0;
     double dx_, dy_, div, rot;
+
+    // TODO: acc!
 
     for (int y = 0; y < grad_x.rows; y+=1) {
         for (int x = 0; x < grad_x.cols; x+=1) {
@@ -318,15 +415,32 @@ void MotionCompensate::detectMovingObjects(const cv::Mat& avg_time_map,
 
     std::vector<double> non_zero_values;
     double sum;
-    for (int i = 0; i < mc_time_map.rows; ++i) {
-        for (int j = 0; j < mc_time_map.cols; ++j) {
-            double val = mc_time_map.at<double>(i, j);
-            if (val > 0.) {
-                non_zero_values.push_back(val);
-                sum += val;
-            }
+
+    // TODO: acc!
+    sum = 0.0;
+
+    // Using OpenCV matrix operations to extract non-zero elements
+    cv::Mat non_zero_mask = mc_time_map > 0.0;  // Create a mask for non-zero values
+    cv::Mat non_zero_values_mat;
+    mc_time_map.copyTo(non_zero_values_mat, non_zero_mask);  // Copy only non-zero elements
+
+    // Iterate through the non-zero values
+    for (int i = 0; i < non_zero_values_mat.total(); ++i) {
+        double val = non_zero_values_mat.at<double>(i);
+        if (val > 0.) {
+            non_zero_values.push_back(val);
+            sum += val;
         }
     }
+    // for (int i = 0; i < mc_time_map.rows; ++i) {
+    //     for (int j = 0; j < mc_time_map.cols; ++j) {
+    //         double val = mc_time_map.at<double>(i, j);
+    //         if (val > 0.) {
+    //             non_zero_values.push_back(val);
+    //             sum += val;
+    //         }
+    //     }
+    // }
     double avg = sum/float(non_zero_values.size());
 
     std::sort(non_zero_values.begin(), non_zero_values.end());
@@ -346,7 +460,7 @@ void MotionCompensate::detectMovingObjects(const cv::Mat& avg_time_map,
     foreground_mask = rho > lambda;
 
     if(filter_small_compo)
-       filterComponents(foreground_mask, foreground_mask, 30, 3.0);
+       filterComponents(foreground_mask, foreground_mask, 15, 3.0);
 
     cv::Mat labels;
     int num_objects = cv::connectedComponents(foreground_mask, labels);
@@ -394,8 +508,8 @@ void MotionCompensate::plotHist(const cv::Mat& avg_image, const cv::Mat& mc_imag
   
   cv::normalize(mc_image, mc_time_map_normalized, 0., 1., cv::NORM_MINMAX);
   cv::normalize(avg_image, avg_time_map_normalized, 0., 1., cv::NORM_MINMAX);
-  mc_time_map_normalized.convertTo(mc_img, CV_32FC1);
-  avg_time_map_normalized.convertTo(avg_img, CV_32FC1);
+  mc_time_map_normalized.convertTo(mc_img, CV_32F);
+  avg_time_map_normalized.convertTo(avg_img, CV_32F);
 
   int histSize = 100; 
   float range[] = {0., 1.};
@@ -493,9 +607,9 @@ void MotionCompensate::saveMapsAsMultiChannels(){
     // cv::normalize(this->mc_event_count_pos_, normalized2, 0., 1., cv::NORM_MINMAX);
     // cv::normalize(this->mc_event_count_neg_, normalized3, 0., 1., cv::NORM_MINMAX);
 
-    // normalized1.convertTo(normalized1, CV_32FC1);
-    // normalized2.convertTo(normalized2, CV_32FC1);
-    // normalized3.convertTo(normalized3, CV_32FC1);
+    // normalized1.convertTo(normalized1, CV_64FC1);
+    // normalized2.convertTo(normalized2, CV_64FC1);
+    // normalized3.convertTo(normalized3, CV_64FC1);
 
     // cv::Mat npy_merged;
     // std::vector<cv::Mat> channels_npy = {normalized1, normalized2, normalized3};

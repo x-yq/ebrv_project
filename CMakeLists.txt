@@ -261,7 +261,7 @@ catkin_simple(ALL_DEPS_REQUIRED)
 # pkg_check_modules( gsl REQUIRED gsl )
 
 find_package(OpenCV REQUIRED)
-# find_package(Ceres REQUIRED)
+find_package(rosbag REQUIRED)
 
 
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3")
@@ -274,7 +274,7 @@ cs_add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(${PROJECT_NAME}
    ${catkin_LIBRARIES}
    ${OpenCV_LIBRARIES}
-  #  ${CERES_LIBRARIES}  # 链接 Ceres 库
+   ${rosbag_LIBRARIES}
   #  ${gsl_LIBRARIES}
 )
 
