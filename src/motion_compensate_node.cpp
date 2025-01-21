@@ -2,7 +2,9 @@
 #include <fast_dynamic/motion_compensate_node.h>
 
 #include <gflags/gflags.h>
+
 // #include <glog/logging.h>
+
 
 int main(int argc, char* argv[])
 {

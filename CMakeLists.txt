@@ -257,11 +257,9 @@ project(fast_dynamic)
 find_package(catkin_simple REQUIRED)
 catkin_simple(ALL_DEPS_REQUIRED)
 
-# find_package(PkgConfig REQUIRED)
-# pkg_check_modules( gsl REQUIRED gsl )
-
 find_package(OpenCV REQUIRED)
 find_package(rosbag REQUIRED)
+find_package(GSL REQUIRED)
 
 
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3")
@@ -270,12 +268,15 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3")
 file(GLOB SOURCES src/*.cpp)
 cs_add_executable(${PROJECT_NAME} ${SOURCES})
 
+include_directories(${GSL_INCLUDE_DIRS})
+
+
 # Link the executable to the necessary libs
 target_link_libraries(${PROJECT_NAME}
    ${catkin_LIBRARIES}
    ${OpenCV_LIBRARIES}
    ${rosbag_LIBRARIES}
-  #  ${gsl_LIBRARIES}
+   ${GSL_LIBRARIES}
 )
 
 # # Add the include directory for cnpy
@@ -286,6 +287,7 @@ link_directories(/home/x-yq/catkin_ws/src/cnpy/build)
 
 # Link your project with the cnpy library
 target_link_libraries(${PROJECT_NAME} cnpy)
+
 
 cs_install()
 cs_export()

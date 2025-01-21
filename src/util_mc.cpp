@@ -13,13 +13,14 @@
 #include <random>
 #include "cnpy.h"  // Include cnpy header for .npy saving
 
-
-
 using namespace cv;
 using namespace std;
+using namespace Eigen;
 
 namespace motion_compensate
 {
+
+
 
 void MotionCompensate::findInitialFlow(const std::vector<dvs_msgs::Event>& events_subset)
 {
@@ -77,18 +78,18 @@ std::array<double, 4> MotionCompensate::findBestFlowInRangeBruteForce(const std:
 
       for (double hth_ = hth_min; hth_ <= hth_max; hth_ += step_zth)
       {
-        // if(enable_depth){
-        //   double cost = contrast_f_numerical(events_subset, hx_, hy_, 0., hth_);
-        //   if (cost < minimum_cost)
-        //   {
-        //     minimum_cost = cost;
-        //     opt_hx = hx_;
-        //     opt_hy = hy_;
-        //     opt_hz = 0.;
-        //     opt_hth = hth_;
-        //   }
-        //   continue;
-        // }
+        if(enable_depth){
+          double cost = contrast_f_numerical(events_subset, hx_, hy_, 0., hth_);
+          if (cost < minimum_cost)
+          {
+            minimum_cost = cost;
+            opt_hx = hx_;
+            opt_hy = hy_;
+            opt_hz = 0.;
+            opt_hth = hth_;
+          }
+          continue;
+        }
         
         for (double hz_ = hz_min; hz_ <= hz_max; hz_ += step_zth)
         {
@@ -102,14 +103,6 @@ std::array<double, 4> MotionCompensate::findBestFlowInRangeBruteForce(const std:
             opt_hz = hz_;
             opt_hth = hth_;
 
-            // ROS_WARN("opt x:%f, y:%f, z:%f, th: %f", opt_hx, opt_hy, opt_hz, opt_hth);
-            // ROS_WARN("min cost: %f", minimum_cost);
-
-            // cv::Mat image_warped = computeImageOfWarpedEvents(events_subset, opt_hx, opt_hy, opt_hz, opt_hth); 
-            // cv::normalize(image_warped, image_warped, 0., 1., cv::NORM_MINMAX);
-            // image_warped.convertTo(image_warped, CV_64FC1);
-            // cv::imshow("MC Initial", image_warped);
-            // cv::waitKey(0);
           }
         }
       }
@@ -156,6 +149,11 @@ double MotionCompensate::getDiversion(double time, double x, double y)
         return 0.;
     }
 
+    
+    // double z_center = depth_map.at<double>(y, x) / 1000.0;
+    // return 1./z_center;
+
+
     // Correct the depth value based on intrinsic parameters
     double fx = K_depth.at<double>(0, 0);
     double fy = K_depth.at<double>(1, 1);
@@ -175,8 +173,8 @@ double MotionCompensate::getDiversion(double time, double x, double y)
             int nx = x + dx;
             int ny = y + dy;
 
-            double z_center = depth_map.at<float>(y, x) / 1000.0;
-            double z_neighbor = depth_map.at<float>(ny, nx) / 1000.0;
+            double z_center = depth_map.at<double>(y, x) / 1000.0;
+            double z_neighbor = depth_map.at<double>(ny, nx) / 1000.0;
 
             // Skip invalid or zero depth values
             if (z_center <= 0.0 || z_neighbor <= 0.0)
@@ -202,27 +200,6 @@ double MotionCompensate::getDiversion(double time, double x, double y)
         return 0.0;
 
     return total_divergence / valid_points;
-}
-
-double MotionCompensate::calculateAverageDiv(const std::vector<dvs_msgs::Event>& events_subset) {
-    double totalDivergence = 0.0;
-    int validCount = 0;
-
-    for (const auto& ev : events_subset) {
-        double divergence = getDiversion(ev.ts.toSec(), ev.x, ev.y);
-        if (divergence != 0.0) {
-            totalDivergence += divergence;
-            validCount++;
-        }
-
-        std::cout<< totalDivergence << std::endl;
-    }
-
-    if (validCount == 0) {
-        return 0.0;
-    }
-
-    return totalDivergence / validCount;
 }
 
 cv::Mat MotionCompensate::computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset, double hx_, double hy_, double hz_, double hth_)
@@ -253,11 +230,11 @@ cv::Mat MotionCompensate::computeImageOfWarpedEvents(const std::vector<dvs_msgs:
     double rotX = cosTheta * xx - sinTheta * yy;
     double rotY = sinTheta * xx + cosTheta * yy;
 
-    w_x = xx + dt * hx_;
-    w_y = xx + dt * hx_;
+    // w_x = xx + dt * hx_;
+    // w_y = xx + dt * hx_;
 
     if(enable_depth){
-      hz_ = getDiversion(ev.ts.toSec(), w_x, w_y);
+      hz_ = getDiversion(ev.ts.toSec(), xx, yy);
       this->hz = hz_;
     }
 
@@ -303,7 +280,6 @@ double MotionCompensate::computeContrast(const cv::Mat& image)
 
 }
 
-
 double MotionCompensate::computeError(const double& l_hx,const double& l_hy,const double& l_hz,const double& l_hth){
   return std::sqrt(
     std::pow(this->hx - l_hx, 2) +
@@ -321,7 +297,6 @@ void MotionCompensate::updateModel(){
   this->htheta += this->lr_rot * this->dth;
 
 }
-
 
 void MotionCompensate::diffTimeImage(const cv::Mat& image){
 
@@ -460,7 +435,7 @@ void MotionCompensate::detectMovingObjects(const cv::Mat& avg_time_map,
     foreground_mask = rho > lambda;
 
     if(filter_small_compo)
-       filterComponents(foreground_mask, foreground_mask, 15, 3.0);
+       filterComponents(foreground_mask, foreground_mask, 30, 2.5);
 
     cv::Mat labels;
     int num_objects = cv::connectedComponents(foreground_mask, labels);
