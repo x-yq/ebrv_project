@@ -20,18 +20,20 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
 
  if(random_initial){
     
-    for (int i = 0; i < this->Z.rows; ++i) {
-      for (int j = 0; j < this->Z.cols; ++j) {
-        if(this->event_count_.at<double>(i, j) < 1.){
-          continue;
-        }
-        else{
-          this->Z.at<double>(i, j) = 2.;
-        }
+    // for (int i = 0; i < this->Z.rows; ++i) {
+    //   for (int j = 0; j < this->Z.cols; ++j) {
+    //     if(this->event_count_.at<double>(i, j) < 1.){
+    //       continue;
+    //     }
+    //     else{
+    //       this->Z.at<double>(i, j) = 20.;
+    //     }
       
-      }
-    }
+    //   }
+    // }
+    
     if(slice_number == 0){
+      this->Z = generateDepthMap(this->depth_patches);
       this->linear_vel_cam = cv::Vec3f(0.0, 0.0, 0.0);
       this->angular_vel_cam = cv::Vec3f(0.0, 0.0, 0.0);
     }
@@ -291,38 +293,62 @@ void MotionCompensate::computeGrad_v2(const cv::Mat& image, const double t_ref, 
 
 }
 
-cv::Mat MotionCompensate::bilinearInterpolate(const cv::Mat& depth_map, double patch_size){
+double MotionCompensate::bilinearInterpolate(double x, double y, double q11, double q12, double q21, double q22) {
+    return q11 * (1 - x) * (1 - y) +
+           q12 * (1 - x) * y +
+           q21 * x * (1 - y) +
+           q22 * x * y;
+}
 
-    cv::Mat interpolated_depth_map = cv::Mat::zeros(img_height, img_width, CV_64FC1);
+cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
 
-    for (int y = patch_size / 2; y < img_height - patch_size / 2; y += patch_size) {
-        for (int x = patch_size / 2; x < img_width - patch_size / 2; x += patch_size) {
+    this->Z = cv::Mat::zeros(this->img_height, this->img_width, CV_64FC1);
+    
+    int patch_width = this->img_width / this->depth_patch_width;
+    int patch_height = this->img_height / this->depth_patch_height;
 
-            double depth = depth_map.at<double>(y, x);
-            
-            interpolated_depth_map.at<double>(y, x) = depth;
 
-            for (int dy = -patch_size / 2; dy < patch_size / 2; ++dy) {
-                for (int dx = -patch_size / 2; dx < patch_size / 2; ++dx) {
-                    int patch_x = x + dx;
-                    int patch_y = y + dy;
-
-                    if (patch_x >= 0 && patch_x < img_width && patch_y >= 0 && patch_y < img_height) {
-                        double depth_top_left = depth_map.at<double>(patch_y - 1, patch_x - 1);
-                        double depth_top_right = depth_map.at<double>(patch_y - 1, patch_x + 1);
-                        double depth_bottom_left = depth_map.at<double>(patch_y + 1, patch_x - 1);
-                        double depth_bottom_right = depth_map.at<double>(patch_y + 1, patch_x + 1);
-
-                        double depth_interpolated = (depth_top_left + depth_top_right + depth_bottom_left + depth_bottom_right) / 4.0;
-                        
-                        interpolated_depth_map.at<double>(patch_y, patch_x) = depth_interpolated;
-                    }
-                }
-            }
+    for (int i = 0; i < this->depth_patch_height; ++i) {
+        for (int j = 0; j < this->depth_patch_width; ++j) {
+            int center_x = j * patch_width + patch_width / 2;
+            int center_y = i * patch_height + patch_height / 2;
+            this->Z.at<double>(center_y, center_x) = depth_patches[i * this->depth_patch_width + j];
         }
     }
 
-    return interpolated_depth_map;
+    for (int r = 0; r < this->img_height; ++r) {
+        for (int c = 0; c < this->img_width; ++c) {
+
+          // if(this->event_count_.at<double>(r, c) < 1.){
+          //   continue;
+          // }
+
+          int left_patch = std::max(0, (c / patch_width));
+          int right_patch = std::min(int(this->depth_patch_width) - 1, left_patch + 1);
+          int top_patch = std::max(0, (r / patch_height));
+          int bottom_patch = std::min(int(this->depth_patch_height) - 1, top_patch + 1);
+
+          int left_center_x = left_patch * patch_width + patch_width / 2;
+          int right_center_x = right_patch * patch_width + patch_width / 2;
+          int top_center_y = top_patch * patch_height + patch_height / 2;
+          int bottom_center_y = bottom_patch * patch_height + patch_height / 2;
+
+          double q11 = this->Z.at<double>(top_center_y, left_center_x);
+          double q12 = this->Z.at<double>(bottom_center_y, left_center_x);
+          double q21 = this->Z.at<double>(top_center_y, right_center_x);
+          double q22 = this->Z.at<double>(bottom_center_y, right_center_x);
+
+          double x_ratio = (double)(c - left_center_x) / (right_center_x - left_center_x);
+          double y_ratio = (double)(r - top_center_y) / (bottom_center_y - top_center_y);
+
+          x_ratio = std::clamp(x_ratio, 0.0, 1.0);
+          y_ratio = std::clamp(y_ratio, 0.0, 1.0);
+
+          this->Z.at<double>(r, c) = bilinearInterpolate(x_ratio, y_ratio, q11, q12, q21, q22);
+        }
+    }
+
+    return this->Z;
 }
 
 double MotionCompensate::computeContrast_v2(const cv::Mat& image)

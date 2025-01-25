@@ -28,7 +28,8 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   nh_private.param<double>("lr_rot", lr_rot, 0.001);
   nh_private.param<double>("filter_threshold", lambda, 0.5);
 
-  nh_private.param<int>("depth_window_size", depth_window_size, 10);
+  nh_private.param<double>("depth_patch_height", depth_patch_height, 10);
+  nh_private.param<double>("depth_patch_width", depth_patch_width, 10);
 
   nh_private.param<bool>("filter_small_compo", filter_small_compo, false);
   nh_private.param<bool>("use_adam", use_adam, false);
@@ -487,6 +488,7 @@ void MotionCompensate::processMessages() {
 void MotionCompensate::processMessages_v2() {
 
   this->Z = -1 * cv::Mat::ones(img_height, img_width,CV_64FC1);
+  this->depth_patches.resize(this->depth_patch_width*this->depth_patch_height, 0.5);
 
   while (idx_first_ev_map_ + num_events_map_update_ <= events_.size())
   {
@@ -558,6 +560,8 @@ void MotionCompensate::processMessages_v2() {
     */
      ROS_WARN("-------------TIME MAP MINIMIZER---------------");
      maximizeContrast(events_subset_);
+     this->Z = generateDepthMap(this->depth_patches);
+     std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
      computeImageOfWarpedEvents_v2(events_subset_);
 
     // this->iter = 0;

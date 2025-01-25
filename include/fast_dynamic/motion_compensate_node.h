@@ -79,6 +79,9 @@ private:
   long total_event_count;
   long total_depth_map_count;
 
+  double depth_patch_height, depth_patch_width;
+  std::vector<double> depth_patches;
+
   // Callback functions
 //   void callback(const dvs_msgs::EventArray::ConstPtr& msg);
   void eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg);
@@ -335,8 +338,8 @@ void computeGrad_v2(const cv::Mat& image, const double t_ref, const cv::Mat& Z);
 double computeContrast_v2(const cv::Mat& image);
 void updateModel_v2();
 void printInfo_v2(const double& contrast, const double& density);
-cv::Mat bilinearInterpolate(const cv::Mat& depth_map, double patch_size);
-
+double bilinearInterpolate(double x, double y, double q11, double q12, double q21, double q22);
+cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
 double maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset);
 
 

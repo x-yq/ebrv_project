@@ -13,11 +13,11 @@
 
 
   <node pkg="rosbag" type="play" name="player" respawn="false"
-  args="-r 0.1 -d 1.0 -s 1.05 /home/x-yq/catkin_ws/bags/event_detector/test_vins.bag"/>
+  args="-r 0.1 -d 1.0 -s 0. /home/x-yq/catkin_ws/bags/slider_depth.bag"/>
 
   <!-- Publish PointStamped from PointStampedArray -->
   <node pkg="fast_dynamic" type="fast_dynamic" name="motion_compensate" output="screen" respawn="false">
-    <param name="num_events_map_update" value="500000" />
+    <param name="num_events_map_update" value="50000" />
     <param name="acc_threshold" value="0.0001" />
     <param name="lr_x" value="10." />
     <param name="lr_y" value="10." />
@@ -25,7 +25,9 @@
     <param name="lr_rot" value="0.0001" />
     <param name="tm_max_iter" value="1000" />
     <param name="filter_threshold" value="0.3" />
-    <param name="depth_window_size" value="10" />
+    
+    <param name="depth_patch_height" value="18" />
+    <param name="depth_patch_width" value="24" />
 
     <param name="use_adam" value="false"/>
     <param name="enable_undistort" value="false"/>
@@ -33,16 +35,16 @@
     <param name="save_frames" value="false"/>
     <param name="plot_hist" value="true"/>
     <param name="better_initial" value="false"/>
-    <param name="random_initial" value = "false"/>
-    <param name="enable_depth" value="true"/>
-    <param name="bag_args" value="-r 0.1 -d 1.0 -s 1.05 /home/x-yq/catkin_ws/bags/event_detector/test_vins.bag"/>
-    <param name="bag_ind" value="0"/>
+    <param name="random_initial" value = "true"/>
+    <param name="enable_depth" value="false"/>
+    <param name="bag_args" value="-r 0.1 -d 1.0 -s 0. /home/x-yq/catkin_ws/bags/simulation_3planes.bag"/>
+    <param name="bag_ind" value="1"/>
     <!-- 0:test_vins   1:slider_depth  2:simulation_3planes -->
 
     <remap from="events" to="/dvs/events" />
     <remap from="event_image" to="event_image" />
-    <!-- <remap from="depth_image" to="/dvs/depthmap" /> -->
-    <remap from="depth_image" to="/camera/depth/image_rect_raw" />
+    <remap from="depth_image" to="/dvs/depthmap" />
+    <!-- <remap from="depth_image" to="/camera/depth/image_rect_raw" /> -->
     <!-- <remap from="imu_data" to="/mavros/imu/data" /> -->
 
   </node>

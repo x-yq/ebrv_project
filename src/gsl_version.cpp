@@ -18,6 +18,7 @@ typedef struct {
   std::vector<dvs_msgs::Event> *poEvents_subset;
   cv::Size * img_size;
   cv::Mat * depth_map;
+  cv::Size * depth_patch_size;
   int* bag_ind;
 
 } AuxdataBestFlow;
@@ -91,8 +92,43 @@ cv::Matx23f B_v2(const int x, const int y, const int bag_ind){
 }
 
 
-double computeC(const cv::Mat& image)
+double calculateSSIM(const cv::Mat& img1, const cv::Mat& img2) {
+
+    const double C1 = 6.5025, C2 = 58.5225;
+
+    cv::Mat img1_float, img2_float;
+    img1.convertTo(img1_float, CV_32FC1);
+    img2.convertTo(img2_float, CV_32FC1);
+
+    cv::Mat mu1, mu2;
+    cv::GaussianBlur(img1_float, mu1, cv::Size(11, 11), 1.5);
+    cv::GaussianBlur(img2_float, mu2, cv::Size(11, 11), 1.5);
+
+    cv::Mat mu1_sq = mu1.mul(mu1);
+    cv::Mat mu2_sq = mu2.mul(mu2);
+    cv::Mat mu1_mu2 = mu1.mul(mu2);
+
+    cv::Mat sigma1_sq, sigma2_sq, sigma12;
+    cv::GaussianBlur(img1_float.mul(img1_float), sigma1_sq, cv::Size(11, 11), 1.5);
+    cv::GaussianBlur(img2_float.mul(img2_float), sigma2_sq, cv::Size(11, 11), 1.5);
+    cv::GaussianBlur(img1_float.mul(img2_float), sigma12, cv::Size(11, 11), 1.5);
+
+    sigma1_sq -= mu1_sq;
+    sigma2_sq -= mu2_sq;
+    sigma12 -= mu1_mu2;
+
+    cv::Mat ssim_map = ((2 * mu1_mu2 + C1).mul(2 * sigma12 + C2)) /
+                       ((mu1_sq + mu2_sq + C1).mul(sigma1_sq + sigma2_sq + C2));
+
+    double ssim = cv::mean(ssim_map)[0];
+    return ssim;
+}
+
+
+double computeC(const cv::Mat& image, const cv::Mat& avg_image)
 {
+  //TODO: maximize contrast firstly with velocity, than with depth
+  // TODO: add a regularzation with sliding window.
 
 // // std deviation
 //   cv::Scalar mean, stddev;
@@ -100,7 +136,12 @@ double computeC(const cv::Mat& image)
 //   return stddev[0] * stddev[0];
 
 //   // norm
-  return cv::norm(image,cv::NORM_L2SQR) / static_cast<double>(image.rows*image.cols);
+  double ssim = calculateSSIM(image, avg_image);
+  double norm_ = cv::norm(image,cv::NORM_L2SQR) / static_cast<double>(image.rows*image.cols);
+  
+  std::cout << "norm value: " << norm_ << " ssim: "<< ssim << std::endl;
+
+  return  norm_ + 5.*ssim;
 
 // // magnitude
 //   cv::Mat grad_x, grad_y;
@@ -126,7 +167,12 @@ double computeC(const cv::Mat& image)
 //       mean_value /= valid_pixel_count; 
 //   }
 
-//   return mean_value;
+  // double ssim = calculateSSIM(image, avg_image);
+
+  // std::cout << "mean value: " << mean_value << "ssim: "<< ssim << std::endl;
+
+
+  // return mean_value + 5.*ssim;
 
 }
 
@@ -179,20 +225,122 @@ cv::Mat computeImage(const cv::Size& size, const std::vector<dvs_msgs::Event>& e
 
 }
 
+cv::Mat computeAvgImage(const cv::Size& size, const std::vector<dvs_msgs::Event>& events_subset) {
+  int img_width = size.width;
+  int img_height = size.height;
+  cv::Mat avg_time_map_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
+  cv::Mat avg_event_count_ = cv::Mat::zeros(img_height,img_width, CV_64FC1);
+
+  const double t_ref = events_subset.front().ts.toSec();
+  int valid = 0;
+  for (const dvs_msgs::Event& ev : events_subset)
+  {
+    double xx = ev.x;
+    double yy = ev.y;
+    double dt = ev.ts.toSec() - t_ref; 
+
+    avg_time_map_.at<double>(yy, xx) += dt;
+    avg_event_count_.at<double>(yy, xx) += 1.;
+
+  }
+
+  cv::Mat invalid_mask = avg_event_count_ < 1.;
+  avg_time_map_.setTo(0.0, invalid_mask);
+  avg_event_count_.setTo(0.000001, invalid_mask);
+  avg_time_map_ = avg_time_map_.mul(1.0 / avg_event_count_);
+  avg_time_map_.setTo(0.0, invalid_mask);
+  return avg_event_count_;
+
+}
+
+double bilinearInterpolate(double x, double y, double q11, double q12, double q21, double q22) {
+    return q11 * (1 - x) * (1 - y) +
+           q12 * (1 - x) * y +
+           q21 * x * (1 - y) +
+           q22 * x * y;
+}
+
+cv::Mat generateDepthMap(const std::vector<double>& depth_patches, const cv::Size& size, int x, int y) {
+    
+    int rows = size.width;
+    int cols = size.height;
+    
+    cv::Mat depth_map(rows, cols, CV_64F, cv::Scalar(0));
+    
+    int patch_width = cols / x;
+    int patch_height = rows / y;
+
+    if (depth_patches.size() != x * y) {
+        std::cerr << "Error: depth_patches size does not match x * y patches!" << std::endl;
+        return depth_map;
+    }
+
+    for (int i = 0; i < y; ++i) {
+        for (int j = 0; j < x; ++j) {
+            int center_x = j * patch_width + patch_width / 2;
+            int center_y = i * patch_height + patch_height / 2;
+            depth_map.at<double>(center_y, center_x) = depth_patches[i * x + j];
+        }
+    }
+
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            int left_patch = std::max(0, (c / patch_width));
+            int right_patch = std::min(x - 1, left_patch + 1);
+            int top_patch = std::max(0, (r / patch_height));
+            int bottom_patch = std::min(y - 1, top_patch + 1);
+
+            int left_center_x = left_patch * patch_width + patch_width / 2;
+            int right_center_x = right_patch * patch_width + patch_width / 2;
+            int top_center_y = top_patch * patch_height + patch_height / 2;
+            int bottom_center_y = bottom_patch * patch_height + patch_height / 2;
+
+            double q11 = depth_map.at<double>(top_center_y, left_center_x);
+            double q12 = depth_map.at<double>(bottom_center_y, left_center_x);
+            double q21 = depth_map.at<double>(top_center_y, right_center_x);
+            double q22 = depth_map.at<double>(bottom_center_y, right_center_x);
+
+            double x_ratio = (double)(c - left_center_x) / (right_center_x - left_center_x);
+            double y_ratio = (double)(r - top_center_y) / (bottom_center_y - top_center_y);
+
+            x_ratio = std::clamp(x_ratio, 0.0, 1.0);
+            y_ratio = std::clamp(y_ratio, 0.0, 1.0);
+
+            depth_map.at<double>(r, c) = bilinearInterpolate(x_ratio, y_ratio, q11, q12, q21, q22);
+        }
+    }
+
+    return depth_map;
+}
+
 
 double contrast_ff_numerical (const gsl_vector *v, void *adata)
 {
     AuxdataBestFlow *poAux_data = (AuxdataBestFlow *) adata;
 
   // Parameter vector (from GSL to OpenCV)
-   cv::Vec3f linear_vel( gsl_vector_get(v,0), gsl_vector_get(v,1), gsl_vector_get(v,2));
-    cv::Vec3f angular_vel( gsl_vector_get(v,3), gsl_vector_get(v,4), gsl_vector_get(v,5) );
+   cv::Vec3f linear_vel( gsl_vector_get(v,0), gsl_vector_get(v,1), gsl_vector_get(v,2) );
+   cv::Vec3f angular_vel( gsl_vector_get(v,3), gsl_vector_get(v,4), gsl_vector_get(v,5) );
+  
+  cv::Size s = *(poAux_data->depth_patch_size);
+  int patch_size_w = s.width;
+  int patch_size_h = s.height;
+  int patch_size = patch_size_w*patch_size_h;
+  std::vector<double> depth_patches_temp(patch_size, 0.);
+  for(int i = 6 ; i < patch_size ; i++){
+    depth_patches_temp[i-6] = gsl_vector_get(v, i);
+  }
 
+  cv::Mat d_map = generateDepthMap(depth_patches_temp, *(poAux_data->img_size), patch_size_w, patch_size_h);
+    
   // Compute cost
   double contrast;
   cv::Mat image_warped;
-  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), *(poAux_data->depth_map), linear_vel, angular_vel, *(poAux_data->bag_ind));
-  contrast = computeC(image_warped);
+  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, linear_vel, angular_vel, *(poAux_data->bag_ind));
+  
+  cv::Mat avg_img = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
+  
+  contrast = computeC(image_warped, avg_img);
   return -contrast;
 }
 
@@ -254,12 +402,13 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
   oAuxdata.poEvents_subset = const_cast<std::vector<dvs_msgs::Event>*>(&events_subset);
   oAuxdata.depth_map = &this->Z;
   oAuxdata.img_size = new cv::Size(this->img_width, this->img_height);
+  oAuxdata.depth_patch_size = new cv::Size(this->depth_patch_width, this->depth_patch_height);
   oAuxdata.bag_ind = new int(this->bag_ind);
 
   //Routines to compute the cost function and its derivatives
   gsl_multimin_function_fdf solver_info;
 
-  const int num_params = 6; // Size of global flow
+  const int num_params = 6 + this->depth_patch_width * this->depth_patch_height; // Size of global flow
   solver_info.n = num_params; // Size of the parameter vector
   solver_info.f = contrast_ff_numerical; // Cost function
   solver_info.df = contrast_df_numerical; // Gradient of cost function
@@ -277,6 +426,10 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
   gsl_vector_set(vx, 3, this->angular_vel_cam[0]);
   gsl_vector_set(vx, 4, this->angular_vel_cam[1]);
   gsl_vector_set(vx, 5, this->angular_vel_cam[2]);
+
+  for(int i = 6 ; i < this->depth_patches.size() - 1 + 6 ; i++){
+    gsl_vector_set(vx, i, this->depth_patches[i-6]);
+  }
 
 
   //Initialize solver
@@ -342,6 +495,12 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
   this->angular_vel_cam[0] = gsl_vector_get(final_x, 3);
   this->angular_vel_cam[1] = gsl_vector_get(final_x, 4);
   this->angular_vel_cam[2] = gsl_vector_get(final_x, 5);
+
+  for(int i = 6 ; i < this->depth_patches.size() - 1 + 6; i++){
+    this->depth_patches[i-6] = gsl_vector_get(final_x, i);
+  }
+
+  this->Z = generateDepthMap(this->depth_patches);
   
   const double final_cost = gsl_multimin_fdfminimizer_minimum(solver);
 
