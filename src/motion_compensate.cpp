@@ -28,8 +28,8 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   nh_private.param<double>("lr_rot", lr_rot, 0.001);
   nh_private.param<double>("filter_threshold", lambda, 0.5);
 
-  nh_private.param<double>("depth_patch_height", depth_patch_height, 10);
-  nh_private.param<double>("depth_patch_width", depth_patch_width, 10);
+  nh_private.param<double>("depth_x_bin_num", depth_x_bin_num, 10);
+  nh_private.param<double>("depth_y_bin_num", depth_y_bin_num, 10);
 
   nh_private.param<bool>("filter_small_compo", filter_small_compo, false);
   nh_private.param<bool>("use_adam", use_adam, false);
@@ -487,9 +487,6 @@ void MotionCompensate::processMessages() {
 
 void MotionCompensate::processMessages_v2() {
 
-  this->Z = -1 * cv::Mat::ones(img_height, img_width,CV_64FC1);
-  this->depth_patches.resize(this->depth_patch_width*this->depth_patch_height, 0.5);
-
   while (idx_first_ev_map_ + num_events_map_update_ <= events_.size())
   {
 
@@ -498,6 +495,9 @@ void MotionCompensate::processMessages_v2() {
     this->event_count_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->mc_event_count_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->ground_mask_ = cv::Mat::zeros(img_height, img_width*2,CV_64FC1);
+    this->event_depth_map_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
+    this->depth_patches = std::vector<double>(this->depth_x_bin_num*this->depth_y_bin_num);
+    this->Z = cv::Mat::zeros(img_height, img_width,CV_64FC1);
   
     const std::vector<dvs_msgs::Event> events_subset_temp = std::vector<dvs_msgs::Event> (events_.begin() + idx_first_ev_map_,
                                                    events_.begin() + idx_first_ev_map_ + num_events_map_update_);
@@ -537,13 +537,33 @@ void MotionCompensate::processMessages_v2() {
     for(const auto& event: events_subset_){
       this->event_count_.at<double>(event.y, event.x) += 1.0;
       this->avg_time_map_.at<double>(event.y, event.x) += (event.ts.toSec() - slice_first_t);
+      // this->event_depth_map_.at<double>(event.y, event.x) = 1.;        
     }
-
 
     cv::Mat invalid_mask = this->event_count_ < 1.0;
     this->avg_time_map_.setTo(0.0, invalid_mask);
+    this->event_depth_map_.setTo(0., invalid_mask);
     this->event_count_.setTo(0.000001, invalid_mask);
     this->avg_time_map_ = this->avg_time_map_.mul(1.0 / this->event_count_);
+    this->event_count_.copyTo(this->mc_event_count_);
+
+    // initialize depth patch
+
+    int patch_width = this->img_width / this->depth_x_bin_num;
+    int patch_height = this->img_height / this->depth_y_bin_num;
+    for (int i = 0; i < this->depth_y_bin_num; ++i) {
+        for (int j = 0; j < this->depth_x_bin_num; ++j) {
+
+            int center_x = j * patch_width + patch_width / 2;
+            int center_y = i * patch_height + patch_height / 2;
+
+            center_x = std::min(center_x, this->img_width - 1);
+            center_y = std::min(center_y, this->img_height - 1);
+
+            double depth_value = this->event_depth_map_.at<double>(center_y, center_x);
+            this->depth_patches[i*this->depth_x_bin_num + j] = depth_value;
+        }
+    }
 
 
     // if (slice_number == 0){
@@ -552,17 +572,28 @@ void MotionCompensate::processMessages_v2() {
     slice_number++;
 
     ROS_WARN("################slice %d##################", slice_number);
-    // printInfo_v2(0.,0.);
-
 
     /***
      * Timestamp Minimizer
     */
      ROS_WARN("-------------TIME MAP MINIMIZER---------------");
-     maximizeContrast(events_subset_);
-     this->Z = generateDepthMap(this->depth_patches);
+
+     double score = maximizeContrast(events_subset_, ByDepth);
      std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
      computeImageOfWarpedEvents_v2(events_subset_);
+     printInfo_v2(score,score);
+     publishMap(slice_first_t);
+
+    //  score = maximizeContrast(events_subset_, ByVel);
+    //  computeImageOfWarpedEvents_v2(events_subset_);
+    //  printInfo_v2(score,score);
+    //  publishMap(slice_first_t);
+
+    //  score = maximizeContrast(events_subset_, ByBoth);
+    //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
+    //  computeImageOfWarpedEvents_v2(events_subset_);
+    //  printInfo_v2(score,score);
+    //  publishMap(slice_first_t);
 
     // this->iter = 0;
 
@@ -618,7 +649,7 @@ void MotionCompensate::processMessages_v2() {
     // }
     
 
-    ROS_WARN("-------------OBJECT DETECTION---------------");
+    // ROS_WARN("-------------OBJECT DETECTION---------------");
     
     
     // duration = events_subset_.back().ts.toSec() - events_subset_.front().ts.toSec();
@@ -627,9 +658,9 @@ void MotionCompensate::processMessages_v2() {
 
     // cv::hconcat(this->foreground_mask, this->background_mask, this->ground_mask_);
     
-    computeImageOfWarpedEvents_v2(events_subset_);
-    printInfo_v2(0.,0.);
-    publishMap(slice_first_t);
+    // computeImageOfWarpedEvents_v2(events_subset_);
+    // printInfo_v2(0.,0.);
+    // publishMap(slice_first_t);
 
 
     if(save_frames) saveMapsAsMultiChannels();

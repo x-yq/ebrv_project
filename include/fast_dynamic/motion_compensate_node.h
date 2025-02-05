@@ -70,6 +70,12 @@ double cx, cy;
 
 int bag_ind;
 
+enum {
+  ByVel, // 0
+  ByDepth,
+  ByBoth
+};
+
 private:
   ros::NodeHandle nh_;   // Node handle used to subscribe to ROS topics
   ros::NodeHandle pnh_;  // Private node handle for reading parameters
@@ -79,7 +85,7 @@ private:
   long total_event_count;
   long total_depth_map_count;
 
-  double depth_patch_height, depth_patch_width;
+  double depth_x_bin_num, depth_y_bin_num;
   std::vector<double> depth_patches;
 
   // Callback functions
@@ -117,6 +123,7 @@ private:
   cv::Mat mc_event_count_neg_;
   cv::Mat mc_time_map_pos_;
   cv::Mat mc_time_map_neg_;
+  cv::Mat event_depth_map_;
 
   double duration;
 
@@ -340,7 +347,7 @@ void updateModel_v2();
 void printInfo_v2(const double& contrast, const double& density);
 double bilinearInterpolate(double x, double y, double q11, double q12, double q21, double q22);
 cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
-double maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset);
+double maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset, const int& method);
 
 
 // template <typename T>

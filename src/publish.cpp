@@ -103,13 +103,13 @@ if ( ground_mask_pub_.getNumSubscribers() > 0){
     }
     this->grad_Z = cv::Mat::zeros(this->Z.rows, this->Z.cols, CV_64FC1);
     cv::hconcat(this->grad_Z, this->Z, image_stacked);
-    image_util::normalize(image_stacked, normalized_stacked_image, 15.);
-    cv::Mat denoised;
-    cv::bilateralFilter(normalized_stacked_image, denoised, 9, 75, 75);
-    denoised = denoiseTimeMap(denoised, 5, 3);
+    image_util::normalize(image_stacked, normalized_stacked_image, 1.);
+    // cv::Mat denoised;
+    // cv::bilateralFilter(normalized_stacked_image, denoised, 9, 75, 75);
+    // denoised = denoiseTimeMap(denoised, 5, 3);
 
     cv::Mat colored_denoised;
-    cv::applyColorMap(denoised, colored_denoised, cv::COLORMAP_JET);
+    cv::applyColorMap(normalized_stacked_image, colored_denoised, cv::COLORMAP_JET);
 
     colored_denoised.copyTo(cv_depth_map.image);
     ground_mask_pub_.publish(cv_depth_map.toImageMsg());
