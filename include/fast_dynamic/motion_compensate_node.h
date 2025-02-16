@@ -69,11 +69,32 @@ int iter;
 double cx, cy;
 
 int bag_ind;
+int contrast_ind;
+int optimize_image_type;
 
 enum {
   ByVel, // 0
   ByDepth,
   ByBoth
+};
+
+enum {
+  NORM, // 0
+  VAR,
+  MAG
+};
+
+enum {
+  TimeMap, // 0
+  EventCount
+};
+
+enum{
+  slider_depth, //0
+  slider_far,
+  what_is_background,
+  test_vins,
+  simulation_3planes
 };
 
 private:
@@ -150,8 +171,6 @@ std::array<double, 4> findBestFlowInRangeBruteForce(const std::vector<dvs_msgs::
 
 double contrast_f_numerical(const std::vector<dvs_msgs::Event>& events_subset, const double hx_, const double hy_, const double hz_, const double hth_);
 
-double getDiversion(double time, double x, double y);
-
 cv::Mat computeImageOfWarpedEvents(const std::vector<dvs_msgs::Event>& events_subset, double hx_, double hy_, double hz_, double hth_);
 
 double computeError(
@@ -215,87 +234,14 @@ struct AdamOptimizer {
 };
 
 
-// const cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
-//         199.0923665423112, 0.0, 132.1920713777002, 
-//         0.0, 198.8288204700886, 110.7126600112956, 
-//         0.0, 0.0, 1.0);
-
-// const cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << 
-//         -0.3684363117977873, 0.1509472435566583, 
-//         -0.0002961305343848646, -0.000759431726241032, 0.0);
-
-// const cv::Mat R = (cv::Mat_<double>(3,3) <<
-//                     1.0, 0.0, 0.0, 
-//                     0.0, 1.0, 0.0,
-//                     0.0, 0.0, 1.0);
-// const cv::Mat P = (cv::Mat_<double>(3,4) <<
-//             168.6294097900391, 0.0, 135.348079770296, 0.0, 
-//             0.0, 178.5641784667969, 113.6189973794753, 0.0, 
-//             0.0, 0.0, 1.0, 0.0);
-
-
-// // //test_vins
-const cv::Mat K_depth = (cv::Mat_<double>(3, 3) <<  
-        5.3633325932983780e+02, 0, 3.2090009280822994e+02, 
-        0, 5.3631797700847164e+02, 2.3404853514480661e+02, 
-        0, 0, 1);
-
-
-// const cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
-//         536.3332593298378, 0, 320.90009280822994, 
-//         0, 536.31797700847164, 234.04853514480661, 
+// // // //test_vins
+// const cv::Mat K_depth = (cv::Mat_<double>(3, 3) <<  
+//         5.3633325932983780e+02, 0, 3.2090009280822994e+02, 
+//         0, 5.3631797700847164e+02, 2.3404853514480661e+02, 
 //         0, 0, 1);
 
-// const cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << 0, 0, 0, 0, 0);
 
-// const cv::Mat R = (cv::Mat_<double>(3,3) <<
-//                     1.0, 0.0, 0.0, 
-//                     0.0, 1.0, 0.0,
-//                     0.0, 0.0, 1.0);
-// const cv::Mat P = (cv::Mat_<double>(3,4) <<
-//             5.3633325932983780e+02, 0.0, 3.2090009280822994e+02, 0.0, 
-//             0.0, 5.3631797700847164e+02, 2.3404853514480661e+02, 0.0, 
-//             0.0, 0.0, 1.0, 0.0);
-
-
-// slider_depth
-
-const cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
-        335.4194629584808, 0.0, 129.9246633794451, 
-        0.0, 335.3529356120773, 99.18643034473205, 
-        0.0, 0.0, 1.0);
-
-const cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << -0.1385927674081299, 0.09337366641919795, -0.0003355869875320301, 0.0001737201582276446, 0.0);
-
-const cv::Mat R = (cv::Mat_<double>(3,3) <<
-                    1.0, 0.0, 0.0, 
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0);
-const cv::Mat P = (cv::Mat_<double>(3,4) <<
-            328.3079223632812, 0.0, 129.7166999252022, 0.0, 
-            0.0, 330.1483459472656, 98.78069942616821, 0.0, 
-            0.0, 0.0, 1.0, 0.0);
-
-
-// simulation3dplane
-
-// const cv::Mat cameraMatrix = (cv::Mat_<double>(3, 3) << 
-//         171.37776185565394, 0.0, 120.0, 
-//         0.0, 171.37776185565394, 90.0, 
-//         0.0, 0.0, 1.0);
-
-// const cv::Mat distCoeffs = (cv::Mat_<double>(5, 1) << 0.0, 0.0, 0.0, 0.0, 0.0);
-
-// const cv::Mat R = (cv::Mat_<double>(3,3) <<
-//                     0.0, 0.0, 0.0, 
-//                     0.0, 0.0, 0.0,
-//                     0.0, 0.0, 0.0);
-// const cv::Mat P = (cv::Mat_<double>(3,4) <<
-//             171.37776185565394, 0.0, 120.0, 
-//         0.0, 171.37776185565394, 90.0, 
-//         0.0, 0.0, 1.0);
-
-
+cv::Mat cameraMatrix, distCoeffs, R, P;
 
 AdamOptimizer ap_x,ap_y,ap_div,ap_rot;
 
@@ -320,7 +266,6 @@ void detectMovingObjects(const cv::Mat& avg_time_map,
 void filterComponents(const cv::Mat& binary_image, cv::Mat& filtered_image, int min_area, float max_aspect_ratio);
 void plotHist(const cv::Mat& avg_image, const cv::Mat& mc_image);
 cv::Mat denoiseTimeMap(const cv::Mat &time_map, int n, int window_size);
-void saveMapsAsMultiChannels();
 
 //TODO:signiture of v2
 
@@ -341,45 +286,12 @@ cv::Mat computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events
 cv::Matx23f A_v2(const int x, const int y);
 cv::Matx23f B_v2(const int x, const int y);
 cv::Mat getGTDepthMap_v2(const double time);
-void computeGrad_v2(const cv::Mat& image, const double t_ref, const cv::Mat& Z);
-double computeContrast_v2(const cv::Mat& image);
-void updateModel_v2();
 void printInfo_v2(const double& contrast, const double& density);
-double bilinearInterpolate(double x, double y, double q11, double q12, double q21, double q22);
-cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
 double maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset, const int& method);
+cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
 
-
-// template <typename T>
-// T computeLoss_v2_autodiff(const std::vector<dvs_msgs::Event>& events_subset,
-//                           const Eigen::Matrix<T, 3, 1>& linear,
-//                           const Eigen::Matrix<T, 3, 1>& angular,
-//                           const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& depthMap);
-
-// template <typename T>
-// cv::Mat computeImage_v2_autodiff(const std::vector<dvs_msgs::Event>& events_subset,
-//                                  const Eigen::Matrix<T, 3, 1>& linear,
-//                                  const Eigen::Matrix<T, 3, 1>& angular,
-//                                  const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& depthMap);
-
-// dual computeLoss_v2_autodiff(const MatrixXd& grad_x, const MatrixXd& grad_y);
-
-// // Eigen::Matrix<dual, Eigen::Dynamic, Eigen::Dynamic> convertToAutodiffMatrix(const cv::Mat& mat);
-
-// void computeGradients_v2_autodiff(const std::vector<dvs_msgs::Event>& events_subset, 
-//                                         const cv::Mat& depthMap, 
-//                                         const cv::Vec3f& linear_vel_cam, 
-//                                         const cv::Vec3f& angular_vel_cam);
-
-// template <typename T>
-// Eigen::Matrix<T, 2, 3> A_v2_autodiff(T xx, T yy);
-
-// template <typename T>
-// Eigen::Matrix<T, 2, 3> B_v2_autodiff(T xx, T yy);
-
-// dual computeCost4SinglePixel_autodiff(const dual& grad_x, const dual& grad_y);
+void get_intrinsic_params();
 
 };
-
 
 } // namespace

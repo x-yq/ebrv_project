@@ -28,29 +28,52 @@ typedef struct {
 
 } AuxdataBestFlow;
 
-cv::Matx23f A_v2(const int x, const int y, const int bag_ind){
-  cv::Mat cMatrix;
-  
-  switch(bag_ind){
-    case 0:
-      cMatrix = (cv::Mat_<double>(3, 3) << 
-        536.3332593298378, 0, 320.90009280822994, 
-        0, 536.31797700847164, 234.04853514480661, 
-        0, 0, 1);
-      break;
-    case 1:
-      cMatrix = (cv::Mat_<double>(3, 3) << 
-        335.4194629584808, 0.0, 129.9246633794451, 
-        0.0, 335.3529356120773, 99.18643034473205, 
-        0.0, 0.0, 1.0);
-        break;
-    default:
-      cMatrix = (cv::Mat_<double>(3, 3) << 
-        171.37776185565394, 0.0, 120.0, 
-        0.0, 171.37776185565394, 90.0, 
-        0.0, 0.0, 1.0);
-      break;
+cv::Mat get_camera_matrix(int bag_ind){
+    
+    cv::Mat cameraMatrix;
+    switch(bag_ind){
+        case 0:
+            cameraMatrix = (cv::Mat_<double>(3, 3) << 
+                335.4194629584808, 0.0, 129.9246633794451, 
+                0.0, 335.3529356120773, 99.18643034473205, 
+                0.0, 0.0, 1.0);
+            break;
+        
+        case 1:
+            cameraMatrix = (cv::Mat_<double>(3, 3) <<
+                335.4194629584808, 0.0, 129.9246633794451, 
+                0.0, 335.3529356120773, 99.18643034473205, 
+                0.0, 0.0, 1.0);
+            break;
+        
+        case 2:
+            cameraMatrix = (cv::Mat_<double>(3, 3) << 
+                199.0923665423112, 0.0, 132.1920713777002, 
+                0.0, 198.8288204700886, 110.7126600112956, 
+                0.0, 0.0, 1.0);
+            break;
+        
+        case 3:
+            cameraMatrix = (cv::Mat_<double>(3, 3) << 
+                536.3332593298378, 0, 320.90009280822994, 
+                0, 536.31797700847164, 234.04853514480661, 
+                0, 0, 1);
+            break;
+        
+        default:
+            cameraMatrix = (cv::Mat_<double>(3, 3) << 
+                171.37776185565394, 0.0, 120.0, 
+                0.0, 171.37776185565394, 90.0, 
+                0.0, 0.0, 1.0);
+            break;
   }
+
+  return cameraMatrix;
+
+}
+
+cv::Matx23f A_v2(const int x, const int y, const int bag_ind){
+  cv::Mat cMatrix = get_camera_matrix(bag_ind);
 
   double fx = cMatrix.at<double>(0, 0);
   double fy = cMatrix.at<double>(1, 1);
@@ -62,28 +85,7 @@ cv::Matx23f A_v2(const int x, const int y, const int bag_ind){
 
 cv::Matx23f B_v2(const int x, const int y, const int bag_ind){
 
-  cv::Mat cMatrix;
-  
-  switch(bag_ind){
-    case 0:
-      cMatrix = (cv::Mat_<double>(3, 3) << 
-        536.3332593298378, 0, 320.90009280822994, 
-        0, 536.31797700847164, 234.04853514480661, 
-        0, 0, 1);
-      break;
-    case 1:
-      cMatrix = (cv::Mat_<double>(3, 3) << 
-        335.4194629584808, 0.0, 129.9246633794451, 
-        0.0, 335.3529356120773, 99.18643034473205, 
-        0.0, 0.0, 1.0);
-        break;
-    default:
-      cMatrix = (cv::Mat_<double>(3, 3) << 
-        171.37776185565394, 0.0, 120.0, 
-        0.0, 171.37776185565394, 90.0, 
-        0.0, 0.0, 1.0);
-      break;
-  }
+  cv::Mat cMatrix = get_camera_matrix(bag_ind);
 
   double fx = cMatrix.at<double>(0, 0);
   double fy = cMatrix.at<double>(1, 1);
@@ -142,6 +144,7 @@ double calculatePSNR(const cv::Mat& img1, const cv::Mat& img2) {
     double psnr = 10.0 * std::log10((max_pixel * max_pixel) / mse);
     return psnr;
 }
+
 
 double computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& magnitude_score, int patch_size = 60, int stride = 60) {
     double total_score = 0.0;
@@ -521,6 +524,209 @@ void contrast_df_numerical (const gsl_vector *v, void *adata, gsl_vector *df)
 
 namespace motion_compensate
 {
+
+cv::Mat MotionCompensate::getGTDepthMap_v2(const double time){
+
+   size_t index = 0;
+    for (size_t i = 0; i < depth_map_timestamps.size(); ++i)
+    {
+        if (depth_map_timestamps[i] > time)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    cv::Mat depth_map = depth_maps_[index];
+    return depth_map;
+
+}
+
+
+void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_subset){
+
+ if(random_initial){
+    
+    // for (int i = 0; i < this->Z.rows; ++i) {
+    //   for (int j = 0; j < this->Z.cols; ++j) {
+    //     if(this->event_count_.at<double>(i, j) < 1.){
+    //       continue;
+    //     }
+    //     else{
+    //       this->Z.at<double>(i, j) = 20.;
+    //     }
+      
+    //   }
+    // }
+    
+    if(slice_number == 0){
+      // this->Z = generateDepthMap(this->depth_patches);
+      this->event_depth_map_.copyTo(this->Z);
+      this->linear_vel_cam = cv::Vec3f(0.26, 0., 0.);
+      this->angular_vel_cam = cv::Vec3f(0.0, 0.0, 0.0);
+    }
+
+ }
+ else{
+
+  this->Z = getGTDepthMap_v2(events_subset.front().ts.toSec());
+  if(slice_number == 0){
+    if(this->bag_ind == 0) this->Z /= 1000.;
+    this->linear_vel_cam = Vec3f(0.0,0.0,0.0);
+    this->angular_vel_cam = Vec3f(0.0,0.0,0.0);
+  }
+ }
+
+
+}
+
+cv::Matx23f MotionCompensate::A_v2(const int x, const int y){
+
+    double fx = cameraMatrix.at<double>(0, 0);
+    double fy = cameraMatrix.at<double>(1, 1);
+    double cxx = cameraMatrix.at<double>(0, 2);
+    double cyy = cameraMatrix.at<double>(1, 2);
+    cv::Matx23f A =cv::Matx23f(fx, 0., -(x-cxx), 0., fy, -(y-cyy));
+    return A;
+}
+
+cv::Matx23f MotionCompensate::B_v2(const int x, const int y){
+
+  double fx = cameraMatrix.at<double>(0, 0);
+  double fy = cameraMatrix.at<double>(1, 1);
+  double cxx = cameraMatrix.at<double>(0, 2);
+  double cyy = cameraMatrix.at<double>(1, 2);
+
+  cv::Matx23f B = cv::Matx23f( 
+    (x - cxx)*(y-cyy)/fx, -(fx*fx + (x-cxx)*(x-cxx))/fx, y-cyy, 
+    (fy*fy + (y-cyy)*(y-cyy))/fy, -(x-cxx)*(y-cyy)/fx, -(x-cxx));
+  return B;
+}
+
+cv::Mat MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset) {
+  
+  this->mc_time_map_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
+  this->mc_event_count_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
+
+  const double t_ref = events_subset.front().ts.toSec();
+  int valid = 0;
+  for (const dvs_msgs::Event& ev : events_subset)
+  {
+    double xx = ev.x;
+    double yy = ev.y;
+    double dt = ev.ts.toSec() - t_ref; 
+    double w_x, w_y;
+
+    double depth = this->Z.at<double>(yy, xx);
+    
+    cv::Matx23f A = A_v2(xx,yy);
+    cv::Matx23f B = B_v2(xx,yy);
+    cv::Vec2f v;
+    if (depth <= 0.) {
+      v = cv::Vec2f(0.,0.);
+      // continue;
+    }else{
+
+      v = (1.0f / depth) * A * this->linear_vel_cam + B * this->angular_vel_cam;
+    }
+    
+    w_x = xx + v[0] * dt;
+    w_y = yy + v[1] * dt;
+
+    if (0. <= w_x && w_x < img_width && 0. <= w_y && w_y < img_height)
+    {
+      valid ++;
+      this->mc_time_map_.at<double>(w_y, w_x) += dt;
+      this->mc_event_count_.at<double>(w_y, w_x) += 1.;
+    }
+
+  }
+
+  cv::Mat invalid_mask = this->mc_event_count_ < 1.;
+  this->mc_time_map_.setTo(0.0, invalid_mask);
+  this->mc_event_count_.setTo(0.000001, invalid_mask);
+  this->mc_time_map_ = this->mc_time_map_.mul(1.0 / this->mc_event_count_);
+  this->mc_time_map_.setTo(0.0, invalid_mask);
+  return this->mc_event_count_;
+
+}
+
+void MotionCompensate::printInfo_v2(const double& contrast, const double& density){
+
+  std::cout << "current linear vel x: " << linear_vel_cam[0] 
+          << " y: " << linear_vel_cam[1] 
+          << " z: " << linear_vel_cam[2] << std::endl;
+  std::cout << "current angular vel x: " << angular_vel_cam[0] 
+          << " y: " << angular_vel_cam[1] 
+          << " z: " << angular_vel_cam[2] << std::endl;
+
+  std::cout << "linear vel dx: " << grad_linear_vel[0] 
+          << " dy: " << grad_linear_vel[1] 
+          << " dz: " << grad_linear_vel[2] << std::endl;
+  std::cout << "angular vel dx: " << grad_angular_vel[0] 
+          << " dy: " << grad_angular_vel[1] 
+          << " dz: " << grad_angular_vel[2] << std::endl;
+  std::cout << "current contrast: " << contrast << std::endl;
+  std::cout << "current density: " << density << std::endl;
+
+}
+
+cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
+
+    this->Z = cv::Mat::zeros(this->img_height, this->img_width, CV_64FC1);
+    
+    int patch_width = this->img_width / this->depth_x_bin_num;
+    int patch_height = this->img_height / this->depth_y_bin_num;
+
+
+    for (int i = 0; i < this->depth_y_bin_num; ++i) {
+        for (int j = 0; j < this->depth_x_bin_num; ++j) {
+            int center_x = j * patch_width + patch_width / 2;
+            int center_y = i * patch_height + patch_height / 2;
+            this->Z.at<double>(center_y, center_x) = depth_patches[i * this->depth_x_bin_num + j];
+        }
+    }
+
+    for (int r = 0; r < this->img_height; ++r) {
+        for (int c = 0; c < this->img_width; ++c) {
+
+          if(this->event_count_.at<double>(r, c) < 1.){
+            this->Z.at<double>(r, c) = 0.;
+            continue;
+          }
+
+          int left_patch = std::max(0, (c / patch_width));
+          int right_patch = std::min(int(this->depth_x_bin_num) - 1, left_patch +1 );
+          int top_patch = std::max(0, (r / patch_height));
+          int bottom_patch = std::min(int(this->depth_y_bin_num) - 1, top_patch + 1);
+
+          int left_center_x = left_patch * patch_width + patch_width / 2;
+          int right_center_x = right_patch * patch_width + patch_width / 2;
+          int top_center_y = top_patch * patch_height + patch_height / 2;
+          int bottom_center_y = bottom_patch * patch_height + patch_height / 2;
+
+          double q11 = this->Z.at<double>(top_center_y, left_center_x);
+          double q12 = this->Z.at<double>(bottom_center_y, left_center_x);
+          double q21 = this->Z.at<double>(top_center_y, right_center_x);
+          double q22 = this->Z.at<double>(bottom_center_y, right_center_x);
+
+
+          double x_diff = right_center_x - left_center_x;
+          double y_diff = bottom_center_y - top_center_y;
+
+          double x_ratio = (x_diff == 0) ? 0.5 : (double)(c - left_center_x) / x_diff;
+          double y_ratio = (y_diff == 0) ? 0.5 : (double)(r - top_center_y) / y_diff;
+
+          // x_ratio = std::clamp(x_ratio, 0.0, 1.0);
+          // y_ratio = std::clamp(y_ratio, 0.0, 1.0);
+
+          this->Z.at<double>(r, c) = bilinearInterpolate(x_ratio, y_ratio, q11, q12, q21, q22);
+        }
+    }
+
+    return this->Z;
+}
+
 
 double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset, const int& method)
 {

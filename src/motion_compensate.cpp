@@ -20,7 +20,6 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
 {
   // Get parameters
   nh_private.param<double>("num_events_map_update", num_events_map_update_, 10000);
-  nh_private.param<double>("acc_threshold", acc_threshold_, 0.0001);
   nh_private.param<double>("tm_max_iter",  maxIterations, 500);
   nh_private.param<double>("lr_x", lr_x, 1.0);
   nh_private.param<double>("lr_y", lr_y, 1.0);
@@ -34,13 +33,16 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   nh_private.param<bool>("filter_small_compo", filter_small_compo, false);
   nh_private.param<bool>("use_adam", use_adam, false);
   nh_private.param<bool>("enable_undistort", enable_undistort, false);
-  nh_private.param<bool>("save_frames", save_frames, false);
   nh_private.param<bool>("plot_hist", plot_hist, false);
   nh_private.param<bool>("better_initial", better_initial, false);
   nh_private.param<bool>("enable_depth", enable_depth, false);
   nh_private.param<bool>("random_initial", random_initial, false);
   nh_private.param<std::string>("bag_args", bag_args, "");
   nh_private.param<int>("bag_ind", bag_ind, 0);
+
+  nh_private.param<int>("contrast_ind", contrast_ind, NORM);
+  nh_private.param<int>("optimize_image_type", optimize_image_type, TimeMap);
+
 
   // set queue_size to 0 to avoid discarding messages (for correctness).
   if(enable_depth){
@@ -252,12 +254,15 @@ void MotionCompensate::checkAndProcess(){
           processMessages_v2();
 
   }else if(!enable_depth){
-    processMessages_v2();
+    // processMessages_v2();
+    processMessages();
   }
 
 }
 
 void MotionCompensate::processMessages() {
+
+  get_intrinsic_params();
 
   while (idx_first_ev_map_ + num_events_map_update_ <= events_.size())
   {
@@ -327,7 +332,6 @@ void MotionCompensate::processMessages() {
     ROS_WARN("################slice %d##################", slice_number);
     printInfo(0.,0.,0.);
 
-
     /***
      * Timestamp Minimizer
     */
@@ -342,13 +346,13 @@ void MotionCompensate::processMessages() {
     computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
     diffTimeImage(this->mc_time_map_);
     updateModel();
-    double l_density = getDensity(this->mc_time_map_, 0.1);
-    double cur_density;
+    // double l_density = getDensity(this->mc_time_map_, 0.1);
+    // double cur_density;
 
     while (true) {
 
       if(std::abs(this->lr_x*this->dx) < 1e-4 && std::abs(this->lr_y*this->dy) < 1e-4 &&
-          std::abs(this->lr_rot*this->dth) < 1e-1){ // && std::abs(this->lr_div*this->dz) < 1e-3){
+          std::abs(this->lr_rot*this->dth) < 1e-3 && std::abs(this->lr_div*this->dz) < 1e-3){
         ROS_WARN("Error converged after %d", iter);
         printInfo(0.,computeContrast(this->mc_time_map_), 0.);
         break;
@@ -358,31 +362,15 @@ void MotionCompensate::processMessages() {
         double l_hx = this->hx, l_hy = this->hy, l_hz = this->hz, l_hth = this->htheta;
 
         computeImageOfWarpedEvents(events_subset_, this->hx, this->hy, this->hz, this->htheta);
-        
-        cur_density = getDensity(this->mc_time_map_, 0.1);
-        if(this->iter > 1.){
-          if(std::abs(cur_density-l_density) < 1e-6){
-            ROS_WARN("Density converged after %d", iter);
-            printInfo(0.,computeContrast(this->mc_time_map_), cur_density);
-            break;
-          }
-        }
-        l_density = cur_density;
 
         diffTimeImage(this->mc_time_map_);
 
         updateModel();
 
-        if (this->dx * old_dx < 0)   this->lr_x *= 0.9;
-        if (this->dy * old_dy < 0)   this->lr_y *= 0.9;
-        if (this->dz * old_dz < 0)   this->lr_rot *= 0.9;
-        if (this->dth * old_dth < 0) this->lr_div *= 0.9;
-
-        // if(computeError(l_hx, l_hy, l_hz, l_hth) < acc_threshold_){
-        //   ROS_WARN("Error converged after %d", iter);
-        //   printInfo(computeError(l_hx, l_hy, l_hz, l_hth),computeContrast(this->mc_time_map_),0.);
-        //   break;
-        // }
+        if (this->dx * old_dx < 0)   this->lr_x *= 0.8;
+        if (this->dy * old_dy < 0)   this->lr_y *= 0.8;
+        if (this->dz * old_dz < 0)   this->lr_rot *= 0.8;
+        if (this->dth * old_dth < 0) this->lr_div *= 0.8;
       
         this->iter+=1;
 
@@ -419,7 +407,7 @@ void MotionCompensate::processMessages() {
     while (true) {
       if(std::abs(D - D_prime) < 1e-8){
           ROS_WARN("Density converged after %d", iter);
-          printInfo(0.,computeContrast(this->mc_time_map_), D);
+          printInfo(0.,computeContrast(this->mc_event_count_), D);
           break;
       }
 
@@ -452,7 +440,7 @@ void MotionCompensate::processMessages() {
 
       if (this->iter > maxIterations){
         ROS_WARN("Reached max iterations %d", iter);
-        printInfo(0., computeContrast(this->mc_time_map_), D);
+        printInfo(0., computeContrast(this->mc_event_count_), D);
         break;
       }
 
@@ -468,7 +456,6 @@ void MotionCompensate::processMessages() {
     cv::hconcat(this->foreground_mask, this->background_mask, this->ground_mask_);
 
     publishMap(0.);
-    if(save_frames) saveMapsAsMultiChannels();
     if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
 
     // Slide
@@ -486,6 +473,8 @@ void MotionCompensate::processMessages() {
 }
 
 void MotionCompensate::processMessages_v2() {
+  
+  get_intrinsic_params();
 
   while (idx_first_ev_map_ + num_events_map_update_ <= events_.size())
   {
@@ -583,70 +572,6 @@ void MotionCompensate::processMessages_v2() {
      computeImageOfWarpedEvents_v2(events_subset_);
      printInfo_v2(score,score);
      publishMap(slice_first_t);
-
-    //  score = maximizeContrast(events_subset_, ByVel);
-    //  computeImageOfWarpedEvents_v2(events_subset_);
-    //  printInfo_v2(score,score);
-    //  publishMap(slice_first_t);
-
-    //  score = maximizeContrast(events_subset_, ByBoth);
-    //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
-    //  computeImageOfWarpedEvents_v2(events_subset_);
-    //  printInfo_v2(score,score);
-    //  publishMap(slice_first_t);
-
-    // this->iter = 0;
-
-    // computeImageOfWarpedEvents_v2(events_subset_);
-    // computeGrad_v2(this->mc_time_map_, slice_first_t, this->Z);
-    // updateModel_v2();
-    // double l_density = getDensity(this->mc_time_map_, 0.1);
-    // double cur_density;
-    // double l_contrast = computeContrast_v2(this->mc_time_map_);
-    // double cur_contrast;
-
-    // // printInfo_v2(l_contrast,l_density);
-    // publishMap(0.);
-
-    // while (true) {
-
-    //   computeImageOfWarpedEvents_v2(events_subset_);
-      
-    //   cur_contrast = computeContrast_v2(this->mc_time_map_);
-    //   cur_density = getDensity(this->mc_time_map_, 0.1);
-    //   // if(slice_number >= 1. && this->iter > 10.){
-
-    //   //   if(std::abs(cur_density-l_density) < 1e-7){
-    //   //     ROS_WARN("Density converged after %d", iter);
-    //   //     printInfo_v2(computeContrast_v2(this->mc_time_map_), cur_density);
-    //   //     break;
-    //   //   }
-    //   //   if(std::abs(cur_contrast-l_contrast) < 1e-7){
-    //   //     ROS_WARN("Contrast converged after %d", iter);
-    //   //     printInfo_v2(computeContrast_v2(this->mc_time_map_), cur_density);
-    //   //     break;
-    //   //   }
-    //   // }
-    //   l_density = cur_density;
-    //   l_contrast = cur_contrast;
-
-    //   computeGrad_v2(this->mc_time_map_, slice_first_t, this->Z);
-    //   // computeGradients_v2_autodiff(events_subset_, this->Z, this->linear_vel_cam, this->angular_vel_cam);
-
-    //   updateModel_v2();
-    
-    //   this->iter+=1;
-
-    //   if (this->iter > this->maxIterations){
-    //     ROS_WARN("Reached max iterations %d", this->iter);
-    //     printInfo_v2(computeContrast_v2(this->mc_time_map_), 0.);
-    //     break;
-    //   }
-
-    //   // publishMap(0.);
-    //   // printInfo_v2(0.,0.);
-
-    // }
     
 
     // ROS_WARN("-------------OBJECT DETECTION---------------");
@@ -663,7 +588,6 @@ void MotionCompensate::processMessages_v2() {
     // publishMap(slice_first_t);
 
 
-    if(save_frames) saveMapsAsMultiChannels();
     if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
 
     // Slide
