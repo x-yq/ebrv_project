@@ -47,7 +47,7 @@ using namespace Eigen;
 namespace motion_compensate
 {
 
-using Transformation = kindr::minimal::QuatTransformation;
+// using Transformation = kindr::minimal::QuatTransformation;
 
 class MotionCompensate {
 public:
@@ -288,7 +288,8 @@ cv::Matx23f A_v2(const int x, const int y);
 cv::Matx23f B_v2(const int x, const int y);
 cv::Mat getGTDepthMap_v2(const double time);
 void printInfo_v2(const double& total_score, const double& contrast_score);
-double maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset, const int& method);
+void logInfo_v2(const int slice_number, const std::string &minimizer_type, const double &total_score, const double &contrast_score, bool evaluate, bool remove);
+double maximizeContrast(const std::vector<dvs_msgs::Event> &events_subset, const int &method);
 cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
 
 void get_intrinsic_params();

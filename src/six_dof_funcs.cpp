@@ -10,6 +10,13 @@
 #include <numeric>
 #include <gsl/gsl_vector.h>
 #include <utility>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <limits>
+#include <ctime>
+#include <sys/stat.h>
+#include "motion_compensate_node.h"
 
 using namespace cv;
 using namespace std;
@@ -25,6 +32,8 @@ typedef struct {
   cv::Size * depth_patch_num;
   int* bag_ind;
   int* optimise_method;
+  int* contrast_ind;
+  double contrast_score = 0.0;
 
 } AuxdataBestFlow;
 
@@ -146,7 +155,7 @@ double calculatePSNR(const cv::Mat& img1, const cv::Mat& img2) {
 }
 
 
-double computeC(const cv::Mat& image, const cv::Mat& inf_image, int patch_size = 60, int stride = 60) {
+std::pair<double, double> computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& contrast_ind, int patch_size = 60, int stride = 60) {
     double total_score = 0.0;
     int count = 0;
     
@@ -158,7 +167,7 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, int patch_size =
 
             double score;
 
-            if(contrast_ind == MAG){
+            if(contrast_ind == 2){
               // magnitude
               cv::Mat grad_x, grad_y;
               cv::Sobel(patch1, grad_x, CV_64FC1, 1, 0, 3);
@@ -182,7 +191,7 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, int patch_size =
                   score /= valid_pixel_count; 
               }
 
-            }else if(contrast_ind == NORM){
+            }else if(contrast_ind == 0){
               // norm
               score = cv::norm(patch1, cv::NORM_L2SQR) / static_cast<double>(patch1.rows * patch1.cols);
             }else{
@@ -206,18 +215,18 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, int patch_size =
 
     double contrast_score = 0.;
     switch (contrast_ind){
-    case NORM:
-      contrast = cv::norm(image,cv::NORM_L2SQR) / static_cast<double>(image.rows*image.cols);
+    case 0:
+      contrast_score = cv::norm(image,cv::NORM_L2SQR) / static_cast<double>(image.rows*image.cols);
       break;
 
-    case VAR: {
+    case 1: {
       cv::Scalar mean, stddev;
       cv::meanStdDev(image, mean, stddev);
-      contrast = stddev[0] * stddev[0];
+      contrast_score = stddev[0] * stddev[0];
       break;
     }
 
-    case MAG:{
+    case 2:{
       cv::Mat grad_x, grad_y;
       cv::Sobel(image, grad_x, CV_64FC1, 1, 0, 3);
       cv::Sobel(image, grad_y, CV_64FC1, 0, 1, 3);
@@ -226,13 +235,13 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, int patch_size =
       cv::magnitude(grad_x, grad_y, magnitude);
 
       cv::Scalar mean_mag = cv::mean(magnitude, magnitude > 1e-7);
-      contrast = mean_mag[0];
+      contrast_score = mean_mag[0];
       break;
 
     }
 
     default:
-      contrast = 0.;
+      contrast_score = 0.;
       break;
   }
 
@@ -403,7 +412,7 @@ double contrast_ff_numerical_vel (const gsl_vector *v, void *adata)
    cv::Vec3f angular_vel( gsl_vector_get(v,3), gsl_vector_get(v,4), gsl_vector_get(v,5) );
   
   // Compute cost
-  double total_score, contrast_score;
+  // double total_score, contrast_score;
   cv::Mat last_img_warped;
   if(image_warped.empty()){
      last_img_warped = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
@@ -414,8 +423,9 @@ double contrast_ff_numerical_vel (const gsl_vector *v, void *adata)
   image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), *(poAux_data->depth_map), linear_vel, angular_vel, *(poAux_data->bag_ind));
   
   
-  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped);
-  this->ContrastScore = contrast_score;
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->contrast_ind));
+  poAux_data->contrast_score = contrast_score;
+
   return -total_score;
 }
 
@@ -449,7 +459,7 @@ double contrast_ff_numerical_depth (const gsl_vector *v, void *adata)
   // }
 
   // Compute cost
-  double total_score, contrast_score;
+  // double total_score, contrast_score;
   cv::Mat last_img_warped;
   if(image_warped.empty()){
      last_img_warped = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
@@ -460,8 +470,8 @@ double contrast_ff_numerical_depth (const gsl_vector *v, void *adata)
   image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, *(poAux_data->linear_vel),  *(poAux_data->angular_vel), *(poAux_data->bag_ind));
   
   
-  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped);
-  this->ContrastScore = contrast_score;
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->contrast_ind));
+  poAux_data->contrast_score = contrast_score;
   return -total_score;
 }
 
@@ -484,7 +494,7 @@ double contrast_ff_numerical (const gsl_vector *v, void *adata)
   cv::Mat d_map = generateDepthMap(depth_patches_temp, *(poAux_data->event_count),*(poAux_data->img_size), patch_num_w, patch_num_h);
     
   // Compute cost
-  double total_score, contrast_score;
+  // double total_score, contrast_score;
   cv::Mat last_img_warped;
   if(image_warped.empty()){
      last_img_warped = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
@@ -497,8 +507,8 @@ double contrast_ff_numerical (const gsl_vector *v, void *adata)
   cv::Vec3f angular_vel( gsl_vector_get(v,patch_num + 3), gsl_vector_get(v,patch_num + 4), gsl_vector_get(v,patch_num + 5) );
   image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, linear_vel, angular_vel, *(poAux_data->bag_ind));  
   
-  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped);
-  this->ContrastScore = contrast_score;
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->contrast_ind));
+  poAux_data->contrast_score = contrast_score;
   return -total_score;
 }
 
@@ -580,8 +590,8 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
 
  if(random_initial){
     
-    double min_depth = 0.1; // meters
-    double max_depth = 3.0; // meters
+    double min_depth = 1.0; // meters
+    double max_depth = 2.0; // meters
     for (int i = 0; i < this->Z.rows; ++i) {
       for (int j = 0; j < this->Z.cols; ++j) {
         if(this->event_count_.at<double>(i, j) < 1.){
@@ -589,7 +599,7 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
           // continue;
         }
         else{
-          // this->Z.at<double>(i, j) = 20.;
+          // this->Z.at<double>(i, j) = 2.;
           this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
 
         }
@@ -709,8 +719,145 @@ void MotionCompensate::printInfo_v2(const double& total_score, const double& con
           << " dz: " << grad_angular_vel[2] << std::endl;
   std::cout << "current total score: " << total_score << std::endl;
   std::cout << "current contrast: " << contrast_score << std::endl;
+  std::cout << "current iteration num: " << this->iter << std::endl;
 
 }
+
+void MotionCompensate::logInfo_v2(const int slice_number, 
+                                   const std::string& minimizer_type,
+                                   const double& total_score, 
+                                   const double& contrast_score, 
+                                   bool evaluate = false,
+                                   bool remove = false)
+{
+    std::ostringstream oss;
+    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/bag_" << this->bag_ind << ".txt";
+    const std::string log_filename = oss.str();
+
+    // 检查是否需要删除文件
+    if (remove) {
+        struct stat buffer;
+        if (stat(log_filename.c_str(), &buffer) == 0) {  // 文件存在
+            std::remove(log_filename.c_str());  // 删除文件
+            std::cout << "File exists, deleted: " << log_filename << std::endl;
+        }
+    }
+
+    // 检查文件是否存在，如果不存在则创建
+    std::ifstream infile(log_filename);
+    if (!infile.is_open()) {
+        std::ofstream outfile(log_filename);  // 创建文件
+        if (outfile.is_open()) {
+            std::cout << "File created: " << log_filename << std::endl;
+        }
+    }
+
+    // ========== EVALUATE ==========
+    if (evaluate) {
+        std::ifstream infile(log_filename);
+        std::string line;
+        int best_slice = -1;
+        double best_contrast = -std::numeric_limits<double>::infinity();
+        std::string best_minimizer;
+        std::vector<std::string> best_block;
+        std::vector<std::string> current_block;
+        int current_slice = -1;
+        std::string current_minimizer;
+
+        while (std::getline(infile, line)) {
+            if (line.find("Slice") == 0) {
+                if (!current_block.empty()) {
+                    // 查找当前 block 的 contrast
+                    for (const auto& l : current_block) {
+                        if (l.find("current contrast:") != std::string::npos) {
+                            std::istringstream iss(l);
+                            std::string token;
+                            double contrast_val;
+                            while (iss >> token) {
+                                if (std::istringstream(token) >> contrast_val) {
+                                    if (contrast_val > best_contrast) {
+                                        best_contrast = contrast_val;
+                                        best_slice = current_slice;
+                                        best_minimizer = current_minimizer;
+                                        best_block = current_block;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    current_block.clear();
+                }
+
+                std::istringstream iss(line);
+                std::string dummy;
+                iss >> dummy >> current_slice >> dummy >> current_minimizer;
+            }
+            current_block.push_back(line);
+        }
+
+        // 最后一块也处理
+        if (!current_block.empty()) {
+            for (const auto& l : current_block) {
+                if (l.find("current contrast:") != std::string::npos) {
+                    std::istringstream iss(l);
+                    std::string token;
+                    double contrast_val;
+                    while (iss >> token) {
+                        if (std::istringstream(token) >> contrast_val) {
+                            if (contrast_val > best_contrast) {
+                                best_contrast = contrast_val;
+                                best_slice = current_slice;
+                                best_minimizer = current_minimizer;
+                                best_block = current_block;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        std::cout << "========= Best Slice Result =========" << std::endl;
+        std::cout << "Best slice number: " << best_slice << std::endl;
+        std::cout << "Best contrast: " << best_contrast << std::endl;
+        std::cout << "Minimizer type: " << best_minimizer << std::endl;
+        std::cout << "Full log block:" << std::endl;
+        for (const auto& l : best_block) {
+            std::cout << l << std::endl;
+        }
+        return;
+    }
+
+    // ========== 正常 LOG 写入 ==========
+    std::ofstream outfile(log_filename, std::ios_base::app);
+    if (!outfile.is_open()) {
+        std::cerr << "Failed to open log file!" << std::endl;
+        return;
+    }
+
+    outfile << "Slice " << slice_number << " MinimizerType " << minimizer_type << std::endl;
+    outfile << std::fixed << std::setprecision(6);
+    outfile << "current linear vel x: " << linear_vel_cam[0] 
+            << " y: " << linear_vel_cam[1] 
+            << " z: " << linear_vel_cam[2] << std::endl;
+    outfile << "current angular vel x: " << angular_vel_cam[0] 
+            << " y: " << angular_vel_cam[1] 
+            << " z: " << angular_vel_cam[2] << std::endl;
+    outfile << "linear vel dx: " << grad_linear_vel[0] 
+            << " dy: " << grad_linear_vel[1] 
+            << " dz: " << grad_linear_vel[2] << std::endl;
+    outfile << "angular vel dx: " << grad_angular_vel[0] 
+            << " dy: " << grad_angular_vel[1] 
+            << " dz: " << grad_angular_vel[2] << std::endl;
+    outfile << "current total score: " << total_score << std::endl;
+    outfile << "current contrast: " << contrast_score << std::endl;
+    outfile << "current iteration num: " << this->iter << std::endl;
+    outfile << "------------------------------" << std::endl;
+
+    outfile.close();
+}
+
 
 cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
 
@@ -790,6 +937,7 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
   oAuxdata.img_size = new cv::Size(this->img_width, this->img_height);
   oAuxdata.depth_patch_num = new cv::Size(this->depth_x_bin_num, this->depth_y_bin_num);
   oAuxdata.bag_ind = new int(this->bag_ind);
+  oAuxdata.contrast_ind = new int(this->contrast_ind);
   oAuxdata.optimise_method = new int(method);
 
   //Routines to compute the cost function and its derivatives
@@ -982,7 +1130,7 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
     this->angular_vel_cam[2] = gsl_vector_get(final_x, this->depth_patches.size() + 5);
 
   }
-  this->Z = generateDepthMap(this->depth_patches);
+  // this->Z = generateDepthMap(this->depth_patches);
   // this->event_depth_map_.copyTo(this->Z);
   
   const double final_cost = gsl_multimin_fdfminimizer_minimum(solver);
@@ -991,6 +1139,8 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
   gsl_multimin_fdfminimizer_free (solver);
   gsl_vector_free (vx);
 
+  this->ContrastScore = oAuxdata.contrast_score;
+  this->iter = (int)iter;
   return final_cost;
 }
 
