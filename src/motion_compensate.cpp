@@ -52,7 +52,7 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
 
     std::string events_topic = "/dvs/events";
     std::string depth_topic;
-    if(this->bag_ind == 0){
+    if(this->bag_ind == test_vins){
       depth_topic = "/camera/depth/image_rect_raw";
     }else{
       depth_topic = "/dvs/depthmap";
@@ -138,6 +138,9 @@ MotionCompensate::MotionCompensate(ros::NodeHandle & nh, ros::NodeHandle nh_priv
   total_event_count = 0;
   total_depth_map_count = 0;
 
+  this->Z = cv::Mat::zeros(480, 640,CV_64FC1);
+
+
 }
 
 
@@ -158,7 +161,7 @@ void MotionCompensate::depthCallback(const sensor_msgs::ImageConstPtr& depth_msg
   std::lock_guard<std::mutex> lock(buffer_mutex_);
   cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_64FC1);
   cv::Mat depth_image = cv_ptr->image;
-  depth_maps_.push_back(depth_image);
+  this->depth_maps_.push_back(depth_image);
   total_depth_msg_size_ ++;
 
   checkAndProcess();
@@ -244,10 +247,11 @@ void MotionCompensate::checkAndProcess(){
   if(enable_depth && total_events_msg_size_ >= expected_events_msg_ && total_depth_msg_size_ >= expected_depth_msg_){
         ROS_INFO("All messages received, starting processing...");
 
-        double interval = (events_.back().ts.toSec() - events_.front().ts.toSec()) / depth_maps_.size();
+        double interval = (events_.back().ts.toSec() - events_.front().ts.toSec()) / this->depth_maps_.size();
+        std::cout << "depth maps number " << depth_maps_.size() << std::endl;
         for (size_t i = 0; i < depth_maps_.size(); ++i) {
             double timestamp = (i + 1) * interval; 
-            depth_map_timestamps.push_back(timestamp); 
+            this->depth_map_timestamps.push_back(timestamp); 
         }
 
         // processMessages();
@@ -484,10 +488,9 @@ void MotionCompensate::processMessages_v2() {
     this->event_count_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->mc_event_count_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->ground_mask_ = cv::Mat::zeros(img_height, img_width*2,CV_64FC1);
-    this->event_depth_map_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
+    this->event_depth_map_ = cv::Mat::ones(img_height, img_width,CV_64FC1);
     this->depth_patches = std::vector<double>(this->depth_x_bin_num*this->depth_y_bin_num);
     // TODO: test first depth map with 0 or 1 for random Z
-    this->Z = cv::Mat::zeros(img_height, img_width,CV_64FC1);
   
     const std::vector<dvs_msgs::Event> events_subset_temp = std::vector<dvs_msgs::Event> (events_.begin() + idx_first_ev_map_,
                                                    events_.begin() + idx_first_ev_map_ + num_events_map_update_);
@@ -591,21 +594,14 @@ void MotionCompensate::processMessages_v2() {
     publishMap(slice_first_t);
     
 
-    // ROS_WARN("-------------OBJECT DETECTION---------------");
+    ROS_WARN("-------------OBJECT DETECTION---------------");
     
     
-    // duration = events_subset_.back().ts.toSec() - events_subset_.front().ts.toSec();
+    duration = events_subset_.back().ts.toSec() - events_subset_.front().ts.toSec();
+    detectMovingObjects(this->avg_time_map_, this->mc_time_map_, duration, this->background_mask, this->foreground_mask);
+    cv::hconcat(this->foreground_mask, this->background_mask, this->ground_mask_);
+    publishMap(0.);
 
-    // detectMovingObjects(this->avg_time_map_, this->mc_time_map_, duration, this->background_mask, this->foreground_mask);
-
-    // cv::hconcat(this->foreground_mask, this->background_mask, this->ground_mask_);
-    
-    // computeImageOfWarpedEvents_v2(events_subset_);
-    // printInfo_v2(0.,0.);
-    // publishMap(slice_first_t);
-
-
-    // if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
 
     // Slide
     if ( num_events_map_update_ <= events_.size() )

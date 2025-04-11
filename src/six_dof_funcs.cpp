@@ -567,22 +567,40 @@ void contrast_df_numerical (const gsl_vector *v, void *adata, gsl_vector *df)
 namespace motion_compensate
 {
 
-cv::Mat MotionCompensate::getGTDepthMap_v2(const double time){
+// cv::Mat MotionCompensate::getGTDepthMap_v2(const double time){
+    
+//   std::cout << "time of the first event in the slice " << time << std::endl;
 
-   size_t index = 0;
-    for (size_t i = 0; i < depth_map_timestamps.size(); ++i)
-    {
-        if (depth_map_timestamps[i] > time)
-        {
-            index = i;
-            break;
-        }
-    }
+//    size_t index = 1;
+//     for (size_t i = 0; i < this->depth_map_timestamps.size(); ++i)
+//     {
+//         if (this->depth_map_timestamps[i] > time)
+//         {
+//             index = i;
+//             break;
+//         }
+//     }
 
-    cv::Mat depth_map = depth_maps_[index];
-    return depth_map;
+//     std::cout << "depth index " << index << ": " << this->depth_map_timestamps[index] << std::endl;
+//     cv::Mat depth_map = depth_maps_[index];
+//     return depth_map;
 
+// }
+
+cv::Mat MotionCompensate::getGTDepthMap_v2(int slice_number) {
+    const int window_size = 8;
+    const int total_depth_maps = 30;
+
+    int depth_index = slice_number / window_size + 1;
+
+    depth_index = std::min(depth_index, total_depth_maps - 1);
+    
+    std::cout << "Total number of depth maps " << this->depth_maps_.size() << std::endl;
+
+    std::cout << "Slice " << slice_number << " -> Depth map " << depth_index << std::endl;
+    return this->depth_maps_[depth_index];
 }
+
 
 
 void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_subset){
@@ -598,8 +616,8 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
           // continue;
         }
         else{
-          // this->Z.at<double>(i, j) = 2.;
-          this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
+          this->Z.at<double>(i, j) = 1.;
+          // this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
 
         }
       
@@ -608,20 +626,16 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
     
     if(slice_number == 0){
     
-      // this->Z = generateDepthMap(this->depth_patches);
-      // this->event_depth_map_.copyTo(this->Z);
       this->linear_vel_cam = cv::Vec3f(0.0, 0., 0.);
       this->angular_vel_cam = cv::Vec3f(0.0, 0.0, 0.0);
     }
 
  }
  else{
-
-    this->Z = getGTDepthMap_v2(events_subset.front().ts.toSec());
+    // this->Z = getGTDepthMap_v2((events_subset.back().ts.toSec()+ events_subset.front().ts.toSec())/2.);
+    this->Z = getGTDepthMap_v2(slice_number);
     //TODO: test the bag_ind should be only in the slice 0?
-    if(this->bag_ind == test_vins) this->Z /= 1000.;
     if(slice_number == 0){
-      // if(this->bag_ind == test_vins) this->Z /= 1000.;
       this->linear_vel_cam = Vec3f(0.0,0.0,0.0);
       this->angular_vel_cam = Vec3f(0.0,0.0,0.0);
     }
@@ -730,7 +744,7 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                                    bool remove = false)
 {
     std::ostringstream oss;
-    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/bag_" << this->bag_ind 
+    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/gt_bag_" << this->bag_ind 
         << "_cType_" << this->contrast_ind << ".txt";
     const std::string log_filename = oss.str();
 
@@ -930,61 +944,61 @@ void MotionCompensate::logInfo_v2(const int slice_number,
 }
 
 
-cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
+// cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
 
-    this->Z = cv::Mat::zeros(this->img_height, this->img_width, CV_64FC1);
+//     this->Z = cv::Mat::zeros(this->img_height, this->img_width, CV_64FC1);
     
-    int patch_width = this->img_width / this->depth_x_bin_num;
-    int patch_height = this->img_height / this->depth_y_bin_num;
+//     int patch_width = this->img_width / this->depth_x_bin_num;
+//     int patch_height = this->img_height / this->depth_y_bin_num;
 
 
-    for (int i = 0; i < this->depth_y_bin_num; ++i) {
-        for (int j = 0; j < this->depth_x_bin_num; ++j) {
-            int center_x = j * patch_width + patch_width / 2;
-            int center_y = i * patch_height + patch_height / 2;
-            this->Z.at<double>(center_y, center_x) = depth_patches[i * this->depth_x_bin_num + j];
-        }
-    }
+//     for (int i = 0; i < this->depth_y_bin_num; ++i) {
+//         for (int j = 0; j < this->depth_x_bin_num; ++j) {
+//             int center_x = j * patch_width + patch_width / 2;
+//             int center_y = i * patch_height + patch_height / 2;
+//             this->Z.at<double>(center_y, center_x) = depth_patches[i * this->depth_x_bin_num + j];
+//         }
+//     }
 
-    for (int r = 0; r < this->img_height; ++r) {
-        for (int c = 0; c < this->img_width; ++c) {
+//     for (int r = 0; r < this->img_height; ++r) {
+//         for (int c = 0; c < this->img_width; ++c) {
 
-          if(this->event_count_.at<double>(r, c) < 1.){
-            this->Z.at<double>(r, c) = 0.;
-            continue;
-          }
+//           if(this->event_count_.at<double>(r, c) < 1.){
+//             this->Z.at<double>(r, c) = 0.;
+//             continue;
+//           }
 
-          int left_patch = std::max(0, (c / patch_width));
-          int right_patch = std::min(int(this->depth_x_bin_num) - 1, left_patch +1 );
-          int top_patch = std::max(0, (r / patch_height));
-          int bottom_patch = std::min(int(this->depth_y_bin_num) - 1, top_patch + 1);
+//           int left_patch = std::max(0, (c / patch_width));
+//           int right_patch = std::min(int(this->depth_x_bin_num) - 1, left_patch +1 );
+//           int top_patch = std::max(0, (r / patch_height));
+//           int bottom_patch = std::min(int(this->depth_y_bin_num) - 1, top_patch + 1);
 
-          int left_center_x = left_patch * patch_width + patch_width / 2;
-          int right_center_x = right_patch * patch_width + patch_width / 2;
-          int top_center_y = top_patch * patch_height + patch_height / 2;
-          int bottom_center_y = bottom_patch * patch_height + patch_height / 2;
+//           int left_center_x = left_patch * patch_width + patch_width / 2;
+//           int right_center_x = right_patch * patch_width + patch_width / 2;
+//           int top_center_y = top_patch * patch_height + patch_height / 2;
+//           int bottom_center_y = bottom_patch * patch_height + patch_height / 2;
 
-          double q11 = this->Z.at<double>(top_center_y, left_center_x);
-          double q12 = this->Z.at<double>(bottom_center_y, left_center_x);
-          double q21 = this->Z.at<double>(top_center_y, right_center_x);
-          double q22 = this->Z.at<double>(bottom_center_y, right_center_x);
+//           double q11 = this->Z.at<double>(top_center_y, left_center_x);
+//           double q12 = this->Z.at<double>(bottom_center_y, left_center_x);
+//           double q21 = this->Z.at<double>(top_center_y, right_center_x);
+//           double q22 = this->Z.at<double>(bottom_center_y, right_center_x);
 
 
-          double x_diff = right_center_x - left_center_x;
-          double y_diff = bottom_center_y - top_center_y;
+//           double x_diff = right_center_x - left_center_x;
+//           double y_diff = bottom_center_y - top_center_y;
 
-          double x_ratio = (x_diff == 0) ? 0.5 : (double)(c - left_center_x) / x_diff;
-          double y_ratio = (y_diff == 0) ? 0.5 : (double)(r - top_center_y) / y_diff;
+//           double x_ratio = (x_diff == 0) ? 0.5 : (double)(c - left_center_x) / x_diff;
+//           double y_ratio = (y_diff == 0) ? 0.5 : (double)(r - top_center_y) / y_diff;
 
-          // x_ratio = std::clamp(x_ratio, 0.0, 1.0);
-          // y_ratio = std::clamp(y_ratio, 0.0, 1.0);
+//           // x_ratio = std::clamp(x_ratio, 0.0, 1.0);
+//           // y_ratio = std::clamp(y_ratio, 0.0, 1.0);
 
-          this->Z.at<double>(r, c) = bilinearInterpolate(x_ratio, y_ratio, q11, q12, q21, q22);
-        }
-    }
+//           this->Z.at<double>(r, c) = bilinearInterpolate(x_ratio, y_ratio, q11, q12, q21, q22);
+//         }
+//     }
 
-    return this->Z;
-}
+//     return this->Z;
+// }
 
 
 double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset, const int& method)
