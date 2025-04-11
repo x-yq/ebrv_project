@@ -755,6 +755,8 @@ void MotionCompensate::logInfo_v2(const int slice_number,
     if (evaluate) {
         std::ifstream infile(log_filename);
         std::string line;
+        
+        // For best slice tracking
         int best_event_count_slice = -1;
         double best_event_count_contrast = -std::numeric_limits<double>::infinity();
         std::string best_event_count_minimizer;
@@ -764,6 +766,12 @@ void MotionCompensate::logInfo_v2(const int slice_number,
         double best_time_map_contrast = -std::numeric_limits<double>::infinity();
         std::string best_time_map_minimizer;
         std::vector<std::string> best_time_map_block;
+
+        // For averages
+        double event_count_contrast_sum = 0;
+        int event_count_count = 0;
+        double time_map_contrast_sum = 0;
+        int time_map_count = 0;
 
         std::vector<std::string> current_block;
         int current_slice = -1;
@@ -781,18 +789,26 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                             while (iss >> token) {
                                 if (std::istringstream(token) >> contrast_val) {
                                     // 处理 Event Count Minimizer
-                                    if (current_minimizer == "Event Count Minimizer" && contrast_val > best_event_count_contrast) {
-                                        best_event_count_contrast = contrast_val;
-                                        best_event_count_slice = current_slice;
-                                        best_event_count_minimizer = current_minimizer;
-                                        best_event_count_block = current_block;
+                                    if (current_minimizer == "Event Count Minimizer") {
+                                        if (contrast_val > best_event_count_contrast) {
+                                            best_event_count_contrast = contrast_val;
+                                            best_event_count_slice = current_slice;
+                                            best_event_count_minimizer = current_minimizer;
+                                            best_event_count_block = current_block;
+                                        }
+                                        event_count_contrast_sum += contrast_val;
+                                        event_count_count++;
                                     }
                                     // 处理 Time Map Minimizer
-                                    else if (current_minimizer == "Time Map Minimizer" && contrast_val > best_time_map_contrast) {
-                                        best_time_map_contrast = contrast_val;
-                                        best_time_map_slice = current_slice;
-                                        best_time_map_minimizer = current_minimizer;
-                                        best_time_map_block = current_block;
+                                    else if (current_minimizer == "Time Map Minimizer") {
+                                        if (contrast_val > best_time_map_contrast) {
+                                            best_time_map_contrast = contrast_val;
+                                            best_time_map_slice = current_slice;
+                                            best_time_map_minimizer = current_minimizer;
+                                            best_time_map_block = current_block;
+                                        }
+                                        time_map_contrast_sum += contrast_val;
+                                        time_map_count++;
                                     }
                                     break;
                                 }
@@ -818,17 +834,25 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                     double contrast_val;
                     while (iss >> token) {
                         if (std::istringstream(token) >> contrast_val) {
-                            if (current_minimizer == "Event Count Minimizer" && contrast_val > best_event_count_contrast) {
-                                best_event_count_contrast = contrast_val;
-                                best_event_count_slice = current_slice;
-                                best_event_count_minimizer = current_minimizer;
-                                best_event_count_block = current_block;
+                            if (current_minimizer == "Event Count Minimizer") {
+                                if (contrast_val > best_event_count_contrast) {
+                                    best_event_count_contrast = contrast_val;
+                                    best_event_count_slice = current_slice;
+                                    best_event_count_minimizer = current_minimizer;
+                                    best_event_count_block = current_block;
+                                }
+                                event_count_contrast_sum += contrast_val;
+                                event_count_count++;
                             }
-                            else if (current_minimizer == "Time Map Minimizer" && contrast_val > best_time_map_contrast) {
-                                best_time_map_contrast = contrast_val;
-                                best_time_map_slice = current_slice;
-                                best_time_map_minimizer = current_minimizer;
-                                best_time_map_block = current_block;
+                            else if (current_minimizer == "Time Map Minimizer") {
+                                if (contrast_val > best_time_map_contrast) {
+                                    best_time_map_contrast = contrast_val;
+                                    best_time_map_slice = current_slice;
+                                    best_time_map_minimizer = current_minimizer;
+                                    best_time_map_block = current_block;
+                                }
+                                time_map_contrast_sum += contrast_val;
+                                time_map_count++;
                             }
                             break;
                         }
@@ -837,8 +861,12 @@ void MotionCompensate::logInfo_v2(const int slice_number,
             }
         }
 
-        // 在日志文件开头写入最佳结果
-        std::ofstream outfile(log_filename, std::ios::app);
+        // 计算平均值
+        double event_count_average = event_count_count > 0 ? event_count_contrast_sum / event_count_count : 0.0;
+        double time_map_average = time_map_count > 0 ? time_map_contrast_sum / time_map_count : 0.0;
+
+        // 在日志文件结尾写入最佳结果和平均值
+        std::ofstream outfile(log_filename, std::ios_base::app);
         if (!outfile.is_open()) {
             std::cerr << "Failed to open log file!" << std::endl;
             return;
@@ -861,6 +889,10 @@ void MotionCompensate::logInfo_v2(const int slice_number,
         for (const auto& l : best_time_map_block) {
             outfile << l << std::endl;
         }
+
+        outfile << "========= Averages =========" << std::endl;
+        outfile << "Average contrast (Event Count Minimizer): " << event_count_average << std::endl;
+        outfile << "Average contrast (Time Map Minimizer): " << time_map_average << std::endl;
 
         outfile << "------------------------------" << std::endl;
         outfile.close();
@@ -896,6 +928,7 @@ void MotionCompensate::logInfo_v2(const int slice_number,
 
     outfile.close();
 }
+
 
 cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
 

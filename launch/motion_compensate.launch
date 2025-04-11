@@ -11,16 +11,16 @@
   <!-- -s 0. /home/x-yq/catkin_ws/bags/slider_depth.bag -->
   <!-- -s 0. /home/x-yq/catkin_ws/bags/simulation_3planes.bag-->
   <node pkg="rosbag" type="play" name="player" respawn="false"
-  args="-r 0.1 -d 1.0 -s 0. /home/x-yq/catkin_ws/bags/slider_depth.bag"/>
+  args="-r 0.1 -d 1.0 -s 0. /home/x-yq/catkin_ws/bags/slider_far.bag"/>
 
   <!-- Publish PointStamped from PointStampedArray -->
   <node pkg="fast_dynamic" type="fast_dynamic" name="motion_compensate" output="screen" respawn="false">
     <param name="num_events_map_update" value="50000" />
-    <param name="contrast_ind" value="VAR"/>
-    <!-- NORM:norm  VAR: variance  MAG: magnitude -->
-    <param name="optimize_image_type" value="TimeMap"/>
-    <!-- TimeMap or EventCount -->
-    <param name="bag_ind" value="slider_depth"/>
+    <param name="contrast_ind" value="0"/>
+    <!-- 0:NORM:norm  1:VAR: variance  2:MAG: magnitude -->
+    <param name="optimize_image_type" value="0"/>
+    <!-- 0:TimeMap or 1:EventCount -->
+    <param name="bag_ind" value="1"/>
     <!-- 0:slider_depth  1:slider_far 2:what_is_background 3:test_vins  4:simulation_3planes  -->
 
     <param name="lr_x" value="100." />
@@ -36,7 +36,7 @@
     <param name="use_adam" value="false"/>
     <param name="enable_undistort" value="false"/>
     <param name="filter_small_compo" value="true"/>
-    <param name="plot_hist" value="false"/>
+    <param name="plot_hist" value="true"/>
     <param name="better_initial" value="false"/>
 
     <param name="random_initial" value = "true"/>

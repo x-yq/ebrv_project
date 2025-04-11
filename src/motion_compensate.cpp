@@ -574,6 +574,9 @@ void MotionCompensate::processMessages_v2() {
      printInfo_v2(total_score, this->ContrastScore);
      logInfo_v2(slice_number,"Time Map Minimizer", total_score, this->ContrastScore, false, false);
      publishMap(slice_first_t);
+    
+    if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
+
 
     /***
      * Event Count Minimizer
@@ -602,7 +605,7 @@ void MotionCompensate::processMessages_v2() {
     // publishMap(slice_first_t);
 
 
-    if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
+    // if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
 
     // Slide
     if ( num_events_map_update_ <= events_.size() )
@@ -615,8 +618,6 @@ void MotionCompensate::processMessages_v2() {
       }
   
   }
-  logInfo_v2(slice_number,"Event Count Minimizer", 0., this->ContrastScore, true, false);
-
 
 }
 

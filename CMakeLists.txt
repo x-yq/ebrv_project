@@ -268,7 +268,8 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3")
 file(GLOB SOURCES src/*.cpp)
 cs_add_executable(${PROJECT_NAME} ${SOURCES})
 
-include_directories(${GSL_INCLUDE_DIRS})
+include_directories(include
+                  ${GSL_INCLUDE_DIRS})
 
 
 # Link the executable to the necessary libs
