@@ -254,8 +254,8 @@ void MotionCompensate::checkAndProcess(){
           processMessages_v2();
 
   }else if(!enable_depth){
-    // processMessages_v2();
-    processMessages();
+    processMessages_v2();
+    // processMessages();
   }
 
 }
@@ -486,6 +486,7 @@ void MotionCompensate::processMessages_v2() {
     this->ground_mask_ = cv::Mat::zeros(img_height, img_width*2,CV_64FC1);
     this->event_depth_map_ = cv::Mat::zeros(img_height, img_width,CV_64FC1);
     this->depth_patches = std::vector<double>(this->depth_x_bin_num*this->depth_y_bin_num);
+    // TODO: test first depth map with 0 or 1 for random Z
     this->Z = cv::Mat::zeros(img_height, img_width,CV_64FC1);
   
     const std::vector<dvs_msgs::Event> events_subset_temp = std::vector<dvs_msgs::Event> (events_.begin() + idx_first_ev_map_,
@@ -567,10 +568,21 @@ void MotionCompensate::processMessages_v2() {
     */
      ROS_WARN("-------------TIME MAP MINIMIZER---------------");
 
-     double score = maximizeContrast(events_subset_, ByDepth);
-     std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
-     computeImageOfWarpedEvents_v2(events_subset_);
-     printInfo_v2(score,score);
+     double total_score = maximizeContrast(events_subset_, ByVel);
+    //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
+     computeImageOfWarpedEvents_v2(events_subset_, TimeMap);
+     printInfo_v2(total_score, this->ContrastScore);
+     publishMap(slice_first_t);
+
+    /***
+     * Event Count Minimizer
+    */
+     ROS_WARN("-------------Event Count MINIMIZER---------------");
+
+     total_score = maximizeContrast(events_subset_, ByVel);
+    //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
+     computeImageOfWarpedEvents_v2(events_subset_, EventCount);
+     printInfo_v2(total_score, this->ContrastScore);
      publishMap(slice_first_t);
     
 

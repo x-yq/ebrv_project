@@ -160,6 +160,7 @@ private:
 
   std::mutex buffer_mutex_;
 
+  double ContrastScore;
   double acc_threshold_;
   double num_events_map_update_;
   double maxIterations;
@@ -282,11 +283,11 @@ ros::Time prev_time_;
 void imuDataCallback(const sensor_msgs::Imu::ConstPtr& imu_msg);
 void processMessages_v2();
 void initialize_v2(const std::vector<dvs_msgs::Event>& events_subset);
-cv::Mat computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset);
+cv::Mat computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset, const int ImageType);
 cv::Matx23f A_v2(const int x, const int y);
 cv::Matx23f B_v2(const int x, const int y);
 cv::Mat getGTDepthMap_v2(const double time);
-void printInfo_v2(const double& contrast, const double& density);
+void printInfo_v2(const double& total_score, const double& contrast_score);
 double maximizeContrast(const std::vector<dvs_msgs::Event>& events_subset, const int& method);
 cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
 

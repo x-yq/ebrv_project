@@ -9,7 +9,7 @@
 #include <dvs_msgs/Event.h>
 #include <numeric>
 #include <gsl/gsl_vector.h>
-
+#include <utility>
 
 using namespace cv;
 using namespace std;
@@ -146,7 +146,7 @@ double calculatePSNR(const cv::Mat& img1, const cv::Mat& img2) {
 }
 
 
-double computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& magnitude_score, int patch_size = 60, int stride = 60) {
+double computeC(const cv::Mat& image, const cv::Mat& inf_image, int patch_size = 60, int stride = 60) {
     double total_score = 0.0;
     int count = 0;
     
@@ -158,7 +158,7 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& magni
 
             double score;
 
-            if(magnitude_score == 0){
+            if(contrast_ind == MAG){
               // magnitude
               cv::Mat grad_x, grad_y;
               cv::Sobel(patch1, grad_x, CV_64FC1, 1, 0, 3);
@@ -182,11 +182,11 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& magni
                   score /= valid_pixel_count; 
               }
 
-            }else if(magnitude_score == 1){
+            }else if(contrast_ind == NORM){
               // norm
               score = cv::norm(patch1, cv::NORM_L2SQR) / static_cast<double>(patch1.rows * patch1.cols);
             }else{
-              // std deviation
+              // variance
               cv::Scalar mean, stddev;
               cv::meanStdDev(patch1, mean, stddev);
               score = stddev[0] * stddev[0];
@@ -203,7 +203,39 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& magni
     }else{
       total_score = 0.;
     }
-    
+
+    double contrast_score = 0.;
+    switch (contrast_ind){
+    case NORM:
+      contrast = cv::norm(image,cv::NORM_L2SQR) / static_cast<double>(image.rows*image.cols);
+      break;
+
+    case VAR: {
+      cv::Scalar mean, stddev;
+      cv::meanStdDev(image, mean, stddev);
+      contrast = stddev[0] * stddev[0];
+      break;
+    }
+
+    case MAG:{
+      cv::Mat grad_x, grad_y;
+      cv::Sobel(image, grad_x, CV_64FC1, 1, 0, 3);
+      cv::Sobel(image, grad_y, CV_64FC1, 0, 1, 3);
+
+      cv::Mat magnitude;
+      cv::magnitude(grad_x, grad_y, magnitude);
+
+      cv::Scalar mean_mag = cv::mean(magnitude, magnitude > 1e-7);
+      contrast = mean_mag[0];
+      break;
+
+    }
+
+    default:
+      contrast = 0.;
+      break;
+  }
+
     // double psnr = calculatePSNR(image, inf_image);
     // total_score += 0.01*psnr;
 
@@ -213,7 +245,7 @@ double computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& magni
     // std::cout << "psnr " << psnr << std::endl;
     // std::cout << "total_score " << total_score << std::endl;
 
-    return total_score;
+    return std::make_pair(total_score, contrast_score);
 }
 
 
@@ -371,7 +403,7 @@ double contrast_ff_numerical_vel (const gsl_vector *v, void *adata)
    cv::Vec3f angular_vel( gsl_vector_get(v,3), gsl_vector_get(v,4), gsl_vector_get(v,5) );
   
   // Compute cost
-  double contrast;
+  double total_score, contrast_score;
   cv::Mat last_img_warped;
   if(image_warped.empty()){
      last_img_warped = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
@@ -382,8 +414,9 @@ double contrast_ff_numerical_vel (const gsl_vector *v, void *adata)
   image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), *(poAux_data->depth_map), linear_vel, angular_vel, *(poAux_data->bag_ind));
   
   
-  contrast = computeC(image_warped, last_img_warped, 2);
-  return -contrast;
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped);
+  this->ContrastScore = contrast_score;
+  return -total_score;
 }
 
 double contrast_ff_numerical_depth (const gsl_vector *v, void *adata)
@@ -416,7 +449,7 @@ double contrast_ff_numerical_depth (const gsl_vector *v, void *adata)
   // }
 
   // Compute cost
-  double contrast;
+  double total_score, contrast_score;
   cv::Mat last_img_warped;
   if(image_warped.empty()){
      last_img_warped = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
@@ -427,9 +460,9 @@ double contrast_ff_numerical_depth (const gsl_vector *v, void *adata)
   image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, *(poAux_data->linear_vel),  *(poAux_data->angular_vel), *(poAux_data->bag_ind));
   
   
-  contrast = computeC(image_warped, last_img_warped, 2);
-  
-  return -contrast;
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped);
+  this->ContrastScore = contrast_score;
+  return -total_score;
 }
 
 double contrast_ff_numerical (const gsl_vector *v, void *adata)
@@ -451,7 +484,7 @@ double contrast_ff_numerical (const gsl_vector *v, void *adata)
   cv::Mat d_map = generateDepthMap(depth_patches_temp, *(poAux_data->event_count),*(poAux_data->img_size), patch_num_w, patch_num_h);
     
   // Compute cost
-  double contrast;
+  double total_score, contrast_score;
   cv::Mat last_img_warped;
   if(image_warped.empty()){
      last_img_warped = computeAvgImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset));
@@ -464,9 +497,9 @@ double contrast_ff_numerical (const gsl_vector *v, void *adata)
   cv::Vec3f angular_vel( gsl_vector_get(v,patch_num + 3), gsl_vector_get(v,patch_num + 4), gsl_vector_get(v,patch_num + 5) );
   image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, linear_vel, angular_vel, *(poAux_data->bag_ind));  
   
-  contrast = computeC(image_warped, last_img_warped, 2);
-  
-  return -contrast;
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped);
+  this->ContrastScore = contrast_score;
+  return -total_score;
 }
 
 double vs_gsl_Gradient_ForwardDiff (
@@ -547,36 +580,43 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
 
  if(random_initial){
     
-    // for (int i = 0; i < this->Z.rows; ++i) {
-    //   for (int j = 0; j < this->Z.cols; ++j) {
-    //     if(this->event_count_.at<double>(i, j) < 1.){
-    //       continue;
-    //     }
-    //     else{
-    //       this->Z.at<double>(i, j) = 20.;
-    //     }
+    double min_depth = 0.1; // meters
+    double max_depth = 3.0; // meters
+    for (int i = 0; i < this->Z.rows; ++i) {
+      for (int j = 0; j < this->Z.cols; ++j) {
+        if(this->event_count_.at<double>(i, j) < 1.){
+          this->Z.at<double>(i, j) = 0.;
+          // continue;
+        }
+        else{
+          // this->Z.at<double>(i, j) = 20.;
+          this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
+
+        }
       
-    //   }
-    // }
+      }
+    }
     
     if(slice_number == 0){
+    
       // this->Z = generateDepthMap(this->depth_patches);
-      this->event_depth_map_.copyTo(this->Z);
-      this->linear_vel_cam = cv::Vec3f(0.26, 0., 0.);
+      // this->event_depth_map_.copyTo(this->Z);
+      this->linear_vel_cam = cv::Vec3f(0.0, 0., 0.);
       this->angular_vel_cam = cv::Vec3f(0.0, 0.0, 0.0);
     }
 
  }
  else{
 
-  this->Z = getGTDepthMap_v2(events_subset.front().ts.toSec());
-  if(slice_number == 0){
-    if(this->bag_ind == 0) this->Z /= 1000.;
-    this->linear_vel_cam = Vec3f(0.0,0.0,0.0);
-    this->angular_vel_cam = Vec3f(0.0,0.0,0.0);
-  }
+    this->Z = getGTDepthMap_v2(events_subset.front().ts.toSec());
+    //TODO: test the bag_ind should be only in the slice 0?
+    if(this->bag_ind == test_vins) this->Z /= 1000.;
+    if(slice_number == 0){
+      // if(this->bag_ind == test_vins) this->Z /= 1000.;
+      this->linear_vel_cam = Vec3f(0.0,0.0,0.0);
+      this->angular_vel_cam = Vec3f(0.0,0.0,0.0);
+    }
  }
-
 
 }
 
@@ -603,7 +643,7 @@ cv::Matx23f MotionCompensate::B_v2(const int x, const int y){
   return B;
 }
 
-cv::Mat MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset) {
+cv::Mat MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset, const int ImageType) {
   
   this->mc_time_map_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
   this->mc_event_count_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
@@ -647,11 +687,12 @@ cv::Mat MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_ms
   this->mc_event_count_.setTo(0.000001, invalid_mask);
   this->mc_time_map_ = this->mc_time_map_.mul(1.0 / this->mc_event_count_);
   this->mc_time_map_.setTo(0.0, invalid_mask);
-  return this->mc_event_count_;
+  if(ImageType==EventCount) return this->mc_event_count_;
+  else return this->mc_time_map_;
 
 }
 
-void MotionCompensate::printInfo_v2(const double& contrast, const double& density){
+void MotionCompensate::printInfo_v2(const double& total_score, const double& contrast_score){
 
   std::cout << "current linear vel x: " << linear_vel_cam[0] 
           << " y: " << linear_vel_cam[1] 
@@ -666,8 +707,8 @@ void MotionCompensate::printInfo_v2(const double& contrast, const double& densit
   std::cout << "angular vel dx: " << grad_angular_vel[0] 
           << " dy: " << grad_angular_vel[1] 
           << " dz: " << grad_angular_vel[2] << std::endl;
-  std::cout << "current contrast: " << contrast << std::endl;
-  std::cout << "current density: " << density << std::endl;
+  std::cout << "current total score: " << total_score << std::endl;
+  std::cout << "current contrast: " << contrast_score << std::endl;
 
 }
 
