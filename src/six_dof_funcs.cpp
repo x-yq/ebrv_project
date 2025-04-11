@@ -16,7 +16,6 @@
 #include <limits>
 #include <ctime>
 #include <sys/stat.h>
-#include "motion_compensate_node.h"
 
 using namespace cv;
 using namespace std;
@@ -731,10 +730,10 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                                    bool remove = false)
 {
     std::ostringstream oss;
-    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/bag_" << this->bag_ind << ".txt";
+    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/bag_" << this->bag_ind 
+        << "_cType_" << this->contrast_ind << ".txt";
     const std::string log_filename = oss.str();
 
-    // 检查是否需要删除文件
     if (remove) {
         struct stat buffer;
         if (stat(log_filename.c_str(), &buffer) == 0) {  // 文件存在
@@ -756,10 +755,16 @@ void MotionCompensate::logInfo_v2(const int slice_number,
     if (evaluate) {
         std::ifstream infile(log_filename);
         std::string line;
-        int best_slice = -1;
-        double best_contrast = -std::numeric_limits<double>::infinity();
-        std::string best_minimizer;
-        std::vector<std::string> best_block;
+        int best_event_count_slice = -1;
+        double best_event_count_contrast = -std::numeric_limits<double>::infinity();
+        std::string best_event_count_minimizer;
+        std::vector<std::string> best_event_count_block;
+
+        int best_time_map_slice = -1;
+        double best_time_map_contrast = -std::numeric_limits<double>::infinity();
+        std::string best_time_map_minimizer;
+        std::vector<std::string> best_time_map_block;
+
         std::vector<std::string> current_block;
         int current_slice = -1;
         std::string current_minimizer;
@@ -767,7 +772,7 @@ void MotionCompensate::logInfo_v2(const int slice_number,
         while (std::getline(infile, line)) {
             if (line.find("Slice") == 0) {
                 if (!current_block.empty()) {
-                    // 查找当前 block 的 contrast
+                    // 处理当前 block 的 contrast
                     for (const auto& l : current_block) {
                         if (l.find("current contrast:") != std::string::npos) {
                             std::istringstream iss(l);
@@ -775,11 +780,19 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                             double contrast_val;
                             while (iss >> token) {
                                 if (std::istringstream(token) >> contrast_val) {
-                                    if (contrast_val > best_contrast) {
-                                        best_contrast = contrast_val;
-                                        best_slice = current_slice;
-                                        best_minimizer = current_minimizer;
-                                        best_block = current_block;
+                                    // 处理 Event Count Minimizer
+                                    if (current_minimizer == "Event Count Minimizer" && contrast_val > best_event_count_contrast) {
+                                        best_event_count_contrast = contrast_val;
+                                        best_event_count_slice = current_slice;
+                                        best_event_count_minimizer = current_minimizer;
+                                        best_event_count_block = current_block;
+                                    }
+                                    // 处理 Time Map Minimizer
+                                    else if (current_minimizer == "Time Map Minimizer" && contrast_val > best_time_map_contrast) {
+                                        best_time_map_contrast = contrast_val;
+                                        best_time_map_slice = current_slice;
+                                        best_time_map_minimizer = current_minimizer;
+                                        best_time_map_block = current_block;
                                     }
                                     break;
                                 }
@@ -805,11 +818,17 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                     double contrast_val;
                     while (iss >> token) {
                         if (std::istringstream(token) >> contrast_val) {
-                            if (contrast_val > best_contrast) {
-                                best_contrast = contrast_val;
-                                best_slice = current_slice;
-                                best_minimizer = current_minimizer;
-                                best_block = current_block;
+                            if (current_minimizer == "Event Count Minimizer" && contrast_val > best_event_count_contrast) {
+                                best_event_count_contrast = contrast_val;
+                                best_event_count_slice = current_slice;
+                                best_event_count_minimizer = current_minimizer;
+                                best_event_count_block = current_block;
+                            }
+                            else if (current_minimizer == "Time Map Minimizer" && contrast_val > best_time_map_contrast) {
+                                best_time_map_contrast = contrast_val;
+                                best_time_map_slice = current_slice;
+                                best_time_map_minimizer = current_minimizer;
+                                best_time_map_block = current_block;
                             }
                             break;
                         }
@@ -818,14 +837,34 @@ void MotionCompensate::logInfo_v2(const int slice_number,
             }
         }
 
-        std::cout << "========= Best Slice Result =========" << std::endl;
-        std::cout << "Best slice number: " << best_slice << std::endl;
-        std::cout << "Best contrast: " << best_contrast << std::endl;
-        std::cout << "Minimizer type: " << best_minimizer << std::endl;
-        std::cout << "Full log block:" << std::endl;
-        for (const auto& l : best_block) {
-            std::cout << l << std::endl;
+        // 在日志文件开头写入最佳结果
+        std::ofstream outfile(log_filename, std::ios::app);
+        if (!outfile.is_open()) {
+            std::cerr << "Failed to open log file!" << std::endl;
+            return;
         }
+
+        outfile << "========= Best Event Count Minimizer =========" << std::endl;
+        outfile << "Best slice number: " << best_event_count_slice << std::endl;
+        outfile << "Best contrast: " << best_event_count_contrast << std::endl;
+        outfile << "Minimizer type: " << best_event_count_minimizer << std::endl;
+        outfile << "Full log block:" << std::endl;
+        for (const auto& l : best_event_count_block) {
+            outfile << l << std::endl;
+        }
+
+        outfile << "========= Best Time Map Minimizer =========" << std::endl;
+        outfile << "Best slice number: " << best_time_map_slice << std::endl;
+        outfile << "Best contrast: " << best_time_map_contrast << std::endl;
+        outfile << "Minimizer type: " << best_time_map_minimizer << std::endl;
+        outfile << "Full log block:" << std::endl;
+        for (const auto& l : best_time_map_block) {
+            outfile << l << std::endl;
+        }
+
+        outfile << "------------------------------" << std::endl;
+        outfile.close();
+
         return;
     }
 
@@ -857,7 +896,6 @@ void MotionCompensate::logInfo_v2(const int slice_number,
 
     outfile.close();
 }
-
 
 cv::Mat MotionCompensate::generateDepthMap(const std::vector<double>& depth_patches) {
 

@@ -571,7 +571,7 @@ void MotionCompensate::processMessages_v2() {
      double total_score = maximizeContrast(events_subset_, ByVel);
     //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
      computeImageOfWarpedEvents_v2(events_subset_, TimeMap);
-    //  printInfo_v2(total_score, this->ContrastScore);
+     printInfo_v2(total_score, this->ContrastScore);
      logInfo_v2(slice_number,"Time Map Minimizer", total_score, this->ContrastScore, false, false);
      publishMap(slice_first_t);
 
@@ -583,7 +583,7 @@ void MotionCompensate::processMessages_v2() {
      total_score = maximizeContrast(events_subset_, ByVel);
     //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
      computeImageOfWarpedEvents_v2(events_subset_, EventCount);
-    //  printInfo_v2(total_score, this->ContrastScore);
+     printInfo_v2(total_score, this->ContrastScore);
     logInfo_v2(slice_number,"Event Count Minimizer", total_score, this->ContrastScore, false, false);
     publishMap(slice_first_t);
     
@@ -603,8 +603,6 @@ void MotionCompensate::processMessages_v2() {
 
 
     if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
-    logInfo_v2(slice_number,"Event Count Minimizer", total_score, this->ContrastScore, true, false);
-
 
     // Slide
     if ( num_events_map_update_ <= events_.size() )
@@ -617,6 +615,8 @@ void MotionCompensate::processMessages_v2() {
       }
   
   }
+  logInfo_v2(slice_number,"Event Count Minimizer", 0., this->ContrastScore, true, false);
+
 
 }
 
