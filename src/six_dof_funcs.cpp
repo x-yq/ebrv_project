@@ -33,6 +33,7 @@ typedef struct {
   int* optimise_method;
   int* contrast_ind;
   double contrast_score = 0.0;
+  int* ImageType;
 
 } AuxdataBestFlow;
 
@@ -154,10 +155,15 @@ double calculatePSNR(const cv::Mat& img1, const cv::Mat& img2) {
 }
 
 
-std::pair<double, double> computeC(const cv::Mat& image, const cv::Mat& inf_image, const int& contrast_ind, int patch_size = 60, int stride = 60) {
+std::pair<double, double> computeC(cv::Mat& image, cv::Mat& inf_image, const int& image_type, const int& contrast_ind, int patch_size = 60, int stride = 60) {
     double total_score = 0.0;
     int count = 0;
-    
+
+    // if(image_type == 0){
+    //   image *= 100.;
+    //   inf_image *= 100.;
+    // }
+
     for (int y = 0; y <= image.rows - patch_size; y += stride) {
         for (int x = 0; x <= image.cols - patch_size; x += stride) {
             cv::Rect roi(x, y, patch_size, patch_size);
@@ -201,7 +207,10 @@ std::pair<double, double> computeC(const cv::Mat& image, const cv::Mat& inf_imag
             }
             
             double ssim = calculateSSIM(patch1, patch2);
-            total_score += score + ssim;
+            double psnr = calculatePSNR(patch1, patch2);
+            // if(image_type == 0) total_score += score + ssim;
+            // else total_score += score + ssim;
+            total_score += score + 1.5*ssim;
             count++;
         }
     }
@@ -211,6 +220,8 @@ std::pair<double, double> computeC(const cv::Mat& image, const cv::Mat& inf_imag
     }else{
       total_score = 0.;
     }
+
+    // if(image_type == 0) image /= 100.;
 
     double contrast_score = 0.;
     switch (contrast_ind){
@@ -257,7 +268,7 @@ std::pair<double, double> computeC(const cv::Mat& image, const cv::Mat& inf_imag
 }
 
 
-cv::Mat computeImage(const cv::Size& size, const std::vector<dvs_msgs::Event>& events_subset, const cv::Mat& Z, const cv::Vec3f& linear_vel, const cv::Vec3f& angular_vel, const int bag_ind) {
+cv::Mat computeImage(const cv::Size& size, const std::vector<dvs_msgs::Event>& events_subset, const cv::Mat& Z, const cv::Vec3f& linear_vel, const cv::Vec3f& angular_vel, const int bag_ind, const int& ImageType) {
   int img_width = size.width;
   int img_height = size.height;
   cv::Mat mc_time_map_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
@@ -302,6 +313,9 @@ cv::Mat computeImage(const cv::Size& size, const std::vector<dvs_msgs::Event>& e
   mc_event_count_.setTo(0.000001, invalid_mask);
   mc_time_map_ = mc_time_map_.mul(1.0 / mc_event_count_);
   mc_time_map_.setTo(0.0, invalid_mask);
+  // if(ImageType==1) return mc_event_count_;
+  // else return mc_time_map_;
+
   return mc_event_count_;
 
 }
@@ -419,10 +433,10 @@ double contrast_ff_numerical_vel (const gsl_vector *v, void *adata)
   }else{
       image_warped.copyTo(last_img_warped);
   }
-  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), *(poAux_data->depth_map), linear_vel, angular_vel, *(poAux_data->bag_ind));
+  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), *(poAux_data->depth_map), linear_vel, angular_vel, *(poAux_data->bag_ind), *(poAux_data->ImageType));
   
   
-  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->contrast_ind));
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped,*(poAux_data->ImageType), *(poAux_data->contrast_ind));
   poAux_data->contrast_score = contrast_score;
 
   return -total_score;
@@ -466,10 +480,10 @@ double contrast_ff_numerical_depth (const gsl_vector *v, void *adata)
   }else{
       image_warped.copyTo(last_img_warped);
   }
-  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, *(poAux_data->linear_vel),  *(poAux_data->angular_vel), *(poAux_data->bag_ind));
+  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, *(poAux_data->linear_vel),  *(poAux_data->angular_vel), *(poAux_data->bag_ind), *(poAux_data->ImageType));
   
   
-  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->contrast_ind));
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->ImageType),*(poAux_data->contrast_ind));
   poAux_data->contrast_score = contrast_score;
   return -total_score;
 }
@@ -504,9 +518,9 @@ double contrast_ff_numerical (const gsl_vector *v, void *adata)
 
   cv::Vec3f linear_vel( gsl_vector_get(v,patch_num), gsl_vector_get(v,patch_num + 1), gsl_vector_get(v,patch_num + 2) );
   cv::Vec3f angular_vel( gsl_vector_get(v,patch_num + 3), gsl_vector_get(v,patch_num + 4), gsl_vector_get(v,patch_num + 5) );
-  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, linear_vel, angular_vel, *(poAux_data->bag_ind));  
+  image_warped = computeImage(*(poAux_data->img_size), *(poAux_data->poEvents_subset), d_map, linear_vel, angular_vel, *(poAux_data->bag_ind), *(poAux_data->ImageType));  
   
-  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->contrast_ind));
+  auto [total_score, contrast_score] = computeC(image_warped, last_img_warped, *(poAux_data->ImageType), *(poAux_data->contrast_ind));
   poAux_data->contrast_score = contrast_score;
   return -total_score;
 }
@@ -588,8 +602,8 @@ namespace motion_compensate
 // }
 
 cv::Mat MotionCompensate::getGTDepthMap_v2(int slice_number) {
-    const int window_size = 8;
-    const int total_depth_maps = 30;
+    const int window_size = 18;
+    const int total_depth_maps = 31;
 
     int depth_index = slice_number / window_size + 1;
 
@@ -606,9 +620,27 @@ cv::Mat MotionCompensate::getGTDepthMap_v2(int slice_number) {
 void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_subset){
 
  if(random_initial){
-    
-    double min_depth = 1.0; // meters
-    double max_depth = 2.0; // meters
+//     double top_depth = 3.5; 
+//     double bottom_depth = 1.5;
+
+//     for (int i = 0; i < this->Z.rows; ++i) {
+//         double depth_range = top_depth - (top_depth - bottom_depth) * (static_cast<double>(i) / this->Z.rows);
+//         double min_depth = depth_range - 0.5; 
+//         double max_depth = depth_range + 0.5;
+        
+//         min_depth = std::max(min_depth, bottom_depth - 0.5);
+//         max_depth = std::min(max_depth, top_depth + 0.5);
+        
+//         for (int j = 0; j < this->Z.cols; ++j) {
+//             if (this->event_count_.at<double>(i, j) < 1.) {
+//                 this->Z.at<double>(i, j) = 0.;
+//             } else {
+//                 this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
+//             }
+//         }
+//     }
+    double min_depth = 2.0; // meters
+    double max_depth = 3.0; // meters
     for (int i = 0; i < this->Z.rows; ++i) {
       for (int j = 0; j < this->Z.cols; ++j) {
         if(this->event_count_.at<double>(i, j) < 1.){
@@ -616,8 +648,8 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
           // continue;
         }
         else{
-          this->Z.at<double>(i, j) = 1.;
-          // this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
+          // this->Z.at<double>(i, j) = 2.;
+          this->Z.at<double>(i, j) = min_depth + static_cast<double>(rand()) / RAND_MAX * (max_depth - min_depth);
 
         }
       
@@ -633,7 +665,8 @@ void MotionCompensate::initialize_v2(const std::vector<dvs_msgs::Event>& events_
  }
  else{
     // this->Z = getGTDepthMap_v2((events_subset.back().ts.toSec()+ events_subset.front().ts.toSec())/2.);
-    this->Z = getGTDepthMap_v2(slice_number);
+    cv::Mat depth_temp = getGTDepthMap_v2(slice_number);
+    this->Z = depth_temp /100.;
     //TODO: test the bag_ind should be only in the slice 0?
     if(slice_number == 0){
       this->linear_vel_cam = Vec3f(0.0,0.0,0.0);
@@ -666,7 +699,7 @@ cv::Matx23f MotionCompensate::B_v2(const int x, const int y){
   return B;
 }
 
-cv::Mat MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset, const int ImageType) {
+double MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset, const int ImageType) {
   
   this->mc_time_map_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
   this->mc_event_count_ = cv::Mat::zeros(img_height, img_width, CV_64FC1);
@@ -710,8 +743,21 @@ cv::Mat MotionCompensate::computeImageOfWarpedEvents_v2(const std::vector<dvs_ms
   this->mc_event_count_.setTo(0.000001, invalid_mask);
   this->mc_time_map_ = this->mc_time_map_.mul(1.0 / this->mc_event_count_);
   this->mc_time_map_.setTo(0.0, invalid_mask);
-  if(ImageType==EventCount) return this->mc_event_count_;
-  else return this->mc_time_map_;
+
+  double final_score;
+  if(ImageType==EventCount){
+      auto [total_score, contrast_score] = computeC(this->mc_event_count_, this->mc_event_count_, 1, this->contrast_ind);
+      final_score = contrast_score;
+
+  }
+  else{
+      auto [total_score, contrast_score] = computeC(this->mc_time_map_, this->mc_time_map_, 0, this->contrast_ind);
+      final_score = contrast_score;
+  }
+
+  return final_score;
+  // if(ImageType==EventCount) return this->mc_event_count_;
+  // else return this->mc_time_map_;
 
 }
 
@@ -744,7 +790,7 @@ void MotionCompensate::logInfo_v2(const int slice_number,
                                    bool remove = false)
 {
     std::ostringstream oss;
-    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/gt_bag_" << this->bag_ind 
+    oss << "/home/x-yq/catkin_ws/src/fast_dynamic/files/bag_" << this->bag_ind 
         << "_cType_" << this->contrast_ind << ".txt";
     const std::string log_filename = oss.str();
 
@@ -1024,6 +1070,7 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
   oAuxdata.bag_ind = new int(this->bag_ind);
   oAuxdata.contrast_ind = new int(this->contrast_ind);
   oAuxdata.optimise_method = new int(method);
+  oAuxdata.ImageType = new int(this->optimize_image_type);
 
   //Routines to compute the cost function and its derivatives
   gsl_multimin_function_fdf solver_info;
@@ -1124,7 +1171,7 @@ double MotionCompensate::maximizeContrast(const std::vector<dvs_msgs::Event>& ev
 
   const int num_max_line_searches = this->maxIterations;
   int status;
-  const double epsabs_grad = 1e-5, tolfun=1e-7;
+  const double epsabs_grad = 1e-6, tolfun=1e-9;
   double cost_new = 1e9, cost_old = 1e9;
   size_t iter = 0;
 

@@ -570,12 +570,12 @@ void MotionCompensate::processMessages_v2() {
      * Timestamp Minimizer
     */
      ROS_WARN("-------------TIME MAP MINIMIZER---------------");
-
+     this->optimize_image_type = TimeMap;
      double total_score = maximizeContrast(events_subset_, ByVel);
     //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
-     computeImageOfWarpedEvents_v2(events_subset_, TimeMap);
-     printInfo_v2(total_score, this->ContrastScore);
-     logInfo_v2(slice_number,"Time Map Minimizer", total_score, this->ContrastScore, false, false);
+     double tm_contrast_score = computeImageOfWarpedEvents_v2(events_subset_, TimeMap);
+     printInfo_v2(total_score, tm_contrast_score);
+     logInfo_v2(slice_number,"Time Map Minimizer", total_score, tm_contrast_score, false, false);
      publishMap(slice_first_t);
     
     if(plot_hist) plotHist(this->avg_time_map_, this->mc_time_map_);
@@ -585,12 +585,12 @@ void MotionCompensate::processMessages_v2() {
      * Event Count Minimizer
     */
      ROS_WARN("-------------Event Count MINIMIZER---------------");
-
-     total_score = maximizeContrast(events_subset_, ByVel);
+    this->optimize_image_type = EventCount;
+    total_score = maximizeContrast(events_subset_, ByVel);
     //  std::cout << this->depth_patches[0] << " " << this->depth_patches[30] << std::endl;
-     computeImageOfWarpedEvents_v2(events_subset_, EventCount);
-     printInfo_v2(total_score, this->ContrastScore);
-    logInfo_v2(slice_number,"Event Count Minimizer", total_score, this->ContrastScore, false, false);
+    double ec_contrast_score = computeImageOfWarpedEvents_v2(events_subset_, EventCount);
+     printInfo_v2(total_score, ec_contrast_score);
+    logInfo_v2(slice_number,"Event Count Minimizer", total_score, ec_contrast_score, false, false);
     publishMap(slice_first_t);
     
 

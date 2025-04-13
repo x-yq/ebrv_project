@@ -282,7 +282,9 @@ ros::Time prev_time_;
 
 void imuDataCallback(const sensor_msgs::Imu::ConstPtr& imu_msg);
 void processMessages_v2();
-cv::Mat computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset, const int ImageType);
+// cv::Mat computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event>& events_subset, const int ImageType);
+double computeImageOfWarpedEvents_v2(const std::vector<dvs_msgs::Event> &events_subset, const int ImageType);
+
 cv::Mat getGTDepthMap_v2(int slice_number);
 void initialize_v2(const std::vector<dvs_msgs::Event> &events_subset);
 cv::Matx23f A_v2(const int x, const int y);
@@ -291,7 +293,7 @@ cv::Matx23f B_v2(const int x, const int y);
 void printInfo_v2(const double& total_score, const double& contrast_score);
 void logInfo_v2(const int slice_number, const std::string &minimizer_type, const double &total_score, const double &contrast_score, bool evaluate, bool remove);
 double maximizeContrast(const std::vector<dvs_msgs::Event> &events_subset, const int &method);
-cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
+// cv::Mat generateDepthMap(const std::vector<double>& depth_patches);
 
 void get_intrinsic_params();
 
