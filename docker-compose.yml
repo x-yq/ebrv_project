@@ -1,0 +1,12 @@
+services:
+  fast_dynamic:
+    build: .
+    image: fast_dynamic:noetic
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./bags:/catkin_ws/bags          # put your .bag files in ./bags
+    network_mode: host
+    # GPU not required. Default command runs the launch file.
