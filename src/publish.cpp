@@ -1,3 +1,13 @@
+/*
+ * Contrast maximization.
+ *
+ * Adapted from:
+ * G. Gallego, H. Rebecq, and D. Scaramuzza,
+ * "A Unifying Contrast Maximization Framework for Event Cameras,
+ * with Applications to Motion, Depth, and Optical Flow Estimation,"
+ * IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2018.
+ */
+
 #include <fast_dynamic/motion_compensate_node.h>
 #include <geometry_msgs/PoseStamped.h>
 // #include <glog/logging.h>

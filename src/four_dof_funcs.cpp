@@ -1,3 +1,11 @@
+/*
+ * This implementation is adapted from:
+ *
+ * - Mitrokhin et al., "Event-based moving object detection and tracking", IROS 2018.
+ * - Gallego et al., "A Unifying Contrast Maximization Framework for Event Cameras,
+ *   with Applications to Motion, Depth, and Optical Flow Estimation", CVPR 2018.
+ */
+
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>

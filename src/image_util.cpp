@@ -1,3 +1,10 @@
+/*
+ * This implementation is adapted from:
+ *
+ * - Gallego et al., "A Unifying Contrast Maximization Framework for Event Cameras,
+ *   with Applications to Motion, Depth, and Optical Flow Estimation", CVPR 2018.
+ */
+
 #include <fast_dynamic/image_util.h>
 
 namespace image_util

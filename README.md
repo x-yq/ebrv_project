@@ -488,6 +488,12 @@ The **moving-object detection component** of this project was developed by **Jia
 
 ## 13. Citation
 
+Parts of this project are adapted from the following works:
+
+- **Moving-object detection:** adapted from Mitrokhin et al. [1].
+- **Contrast maximization and motion compensation:** adapted from Gallego et al. [2].
+- **Event-camera dataset:** based on the dataset introduced by Mueggler et al. [3].
+
 If you use this project or its related methods, please also cite:
 
 ```bibtex
@@ -497,6 +503,16 @@ If you use this project or its related methods, please also cite:
   booktitle={IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
   year={2018}
 }
+
+@inproceedings{Gallego_2018,
+   title={A Unifying Contrast Maximization Framework for Event Cameras, with Applications to Motion, Depth, and Optical Flow Estimation},
+   url={http://dx.doi.org/10.1109/CVPR.2018.00407},
+   DOI={10.1109/cvpr.2018.00407},
+   booktitle={2018 IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+   publisher={IEEE},
+   author={Gallego, Guillermo and Rebecq, Henri and Scaramuzza, Davide},
+   year={2018},
+   month=June, pages={3867–3876} }
 
 @article{mueggler2017event,
   title={The event-camera dataset and simulator: Event-based data for pose estimation, visual odometry, and SLAM},
