@@ -30,313 +30,444 @@ Motion-Compensated Representation
 Moving Object Detection
 ```
 
-## 2. Environment Setup
+---
 
-Tested layout: **Ubuntu 20.04 + ROS Noetic** (any ROS1 distro with a C++17 compiler should work).
+## 2. Docker Setup
 
-### 2.1 Requirements
+The project uses Docker to provide a reproducible ROS Noetic development environment.
 
-| Dependency | Used for |
-|---|---|
-| ROS1 (`roscpp`, `rosbag`, `cv_bridge`, `image_transport`, `image_geometry`, `sensor_msgs`, `geometry_msgs`) | node, bag reading, image publishing |
-| `catkin_simple` | build system (`catkin_simple()` / `cs_add_executable`) |
-| `minkindr` (kindr) | transformations |
-| `dvs_msgs`, `dvs_renderer` (from `rpg_dvs_ros`) | event messages, event rendering in the launch file |
-| `rqt_gui` | dashboard opened by the launch file |
-| OpenCV | image operations |
-| Eigen3 | linear algebra |
-| GSL | numerical minimization |
-| `autodiff` (header-only) | automatic differentiation |
-| Ceres Solver | included by the source files |
-| gflags | included by the node |
-| `cnpy` | saving `.npy` files |
-| C++17 compiler | `-std=c++17` is set in `CMakeLists.txt` |
+### Base Image
 
-### 2.2 Install system packages
+The current configuration uses the **ARM64 ROS Noetic image** to match the target `aarch64` platform, therefore, the Docker image is based on:
 
-```bash
-sudo apt update
-sudo apt install -y \
-  git wget build-essential cmake \
-  ros-noetic-desktop-full ros-noetic-catkin python3-catkin-tools \
-  ros-noetic-cv-bridge ros-noetic-image-transport ros-noetic-image-geometry \
-  ros-noetic-rqt ros-noetic-rqt-gui \
-  libopencv-dev libeigen3-dev libgsl-dev libceres-dev libgflags-dev zlib1g-dev
+```dockerfile
+FROM arm64v8/ros:noetic
 ```
 
-(If ROS is not installed yet, follow <http://wiki.ros.org/noetic/Installation/Ubuntu>.)
+If you are running the project on the x86 platform, change the Dockerfile image source to:
 
-### 2.3 Create the workspace and fetch ROS dependencies
-
-```bash
-source /opt/ros/noetic/setup.bash
-mkdir -p ~/catkin_ws/src
-cd ~/catkin_ws/src
-
-# build helper used by CMakeLists.txt
-git clone https://github.com/catkin/catkin_simple.git
-
-# event camera messages + renderer
-git clone https://github.com/uzh-rpg/rpg_dvs_ros.git
-
-# transformations (follow its README for its own dependencies, e.g. eigen_catkin)
-git clone https://github.com/ethz-asl/minkindr.git
-
-# this project
-git clone <YOUR_REPOSITORY_URL> fast_dynamic
+```dockerfile
+FROM osrf/ros:noetic-desktop-full
 ```
 
-> `rpg_dvs_ros` also contains camera driver packages that need `libcaer`. If you only replay bags, skip them at build time (see 2.6).
+The Docker image contains:
 
-### 2.4 Install `autodiff` (header-only)
+- ROS Noetic
+- OpenCV, Eigen3, GSL and Ceres
+- `autodiff`
+- `cnpy`
+- `catkin_simple`
+- `minkindr`
+- `rpg_dvs_ros`
+- Required ROS packages and build dependencies
 
-```bash
-cd ~
-git clone https://github.com/autodiff/autodiff.git
-cd autodiff && mkdir build && cd build
-cmake .. -DAUTODIFF_BUILD_TESTS=OFF -DAUTODIFF_BUILD_PYTHON=OFF \
-         -DAUTODIFF_BUILD_EXAMPLES=OFF -DAUTODIFF_BUILD_DOCS=OFF
-sudo make install
-```
+The project source code and ROS bags are mounted from the host machine at runtime.
 
-### 2.5 Build `cnpy` and fix the path in `CMakeLists.txt`
+### Build the Docker image
 
-```bash
-cd ~/catkin_ws/src
-git clone https://github.com/rogersce/cnpy.git
-cd cnpy && mkdir build && cd build
-cmake .. && make
-```
-
-`CMakeLists.txt` currently hardcodes the author's machine path. Replace **both** occurrences of `/home/x-yq/catkin_ws/src/cnpy` with your own path:
-
-```cmake
-include_directories(/home/<YOUR_USER>/catkin_ws/src/cnpy)
-link_directories(/home/<YOUR_USER>/catkin_ws/src/cnpy/build)
-```
-
-If the node fails at start-up with `libcnpy.so: cannot open shared object file`, add the build folder to the library path:
+From the repository root:
 
 ```bash
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/catkin_ws/src/cnpy/build
-```
-
-### 2.6 Build
-
-```bash
-cd ~/catkin_ws
-catkin_make -DCATKIN_BLACKLIST_PACKAGES="davis_ros_driver;dvs_ros_driver;dvxplorer_ros_driver"
-source devel/setup.bash
-```
-
-Make sure the package's `package.xml` lists the dependencies above, because `catkin_simple(ALL_DEPS_REQUIRED)` reads them from it.
-
-## 3. Docker (all-in-one setup)
-
-The `Dockerfile` installs every dependency (ROS Noetic, OpenCV, GSL, Ceres, `autodiff`, `cnpy`, `catkin_simple`, `minkindr` and its dependencies, `rpg_dvs_ros`), patches the hardcoded paths, and builds the package. Put it in the repository root (next to `package.xml`).
-
-```bash
-# 1. build the image
 docker build -t fast_dynamic:noetic .
+```
 
-# 2. put bags in ./bags (see "Download the ROS Bags"), allow X11, run
+The image only needs to be rebuilt when the Docker environment or dependencies change.
+
+**You do not need to rebuild the image after modifying the project source code or launch files.**
+
+---
+
+## 3. Download the ROS Bags
+
+Create a `bags` directory in the repository:
+
+```bash
 mkdir -p bags
-xhost +local:docker
-docker run --rm -it --net=host \
-  -e DISPLAY=$DISPLAY -e QT_X11_NO_MITSHM=1 \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  -v $PWD/bags:/catkin_ws/bags \
-  fast_dynamic:noetic
 ```
 
-Or with Compose: `docker compose up`.
+### Slider sequences
 
-Notes:
+The project uses event-camera sequences from the UZH RPG DAVIS dataset.
 
-- The default command runs `roslaunch fast_dynamic motion_compensate.launch`. Inside the container, bags live in `/catkin_ws/bags` (the launch file's `/home/x-yq/catkin_ws/bags` is rewritten to this path), so the launch file expects e.g. `/catkin_ws/bags/slider_depth.bag`. Adjust the bag file name and `bag_ind` in the launch file, or override the command:
-  ```bash
-  docker run --rm -it --net=host -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v $PWD/bags:/catkin_ws/bags fast_dynamic:noetic \
-    bash -c "roscore & sleep 3; rosrun fast_dynamic fast_dynamic events:=/dvs/events _bag_ind:=0 & rosbag play /catkin_ws/bags/slider_depth.bag"
-  ```
-- A display is needed for `rqt_gui` and OpenCV windows (Linux/X11 as shown; on macOS/Windows use an X server such as XQuartz/VcXsrv). For headless runs, run the node and `rosbag play` manually as above and skip `rqt_gui`.
-- To use your own launch/source edits without rebuilding the whole image, rebuild with `docker build` (dependency layers are cached, so only the last layers rerun).
-- The Docker build was written from the project's source files and dependency manifests; if a dependency version drifts, pin its git tag in the `Dockerfile`.
-
-## 4. Download the ROS Bags
-
-Create a folder for the data:
+For example:
 
 ```bash
-mkdir -p ~/catkin_ws/bags && cd ~/catkin_ws/bags
-```
+cd bags
 
-### Slider sequences (public, UZH RPG Event-Camera Dataset)
-
-Dataset page: <http://rpg.ifi.uzh.ch/davis_data.html> (Mueggler et al., IJRR 2017). The bags are in the RPG DVS ROS driver format.
-
-```bash
 wget http://rpg.ifi.uzh.ch/datasets/davis/slider_depth.bag
 wget http://rpg.ifi.uzh.ch/datasets/davis/slider_far.bag
+
+cd ..
 ```
 
-If a direct link is unavailable, download the file from the dataset page's table instead.
-
-### Other sequences
-
-| Sequence | Source |
-|---|---|
-| `What_is_Background` | Moving-object dataset accompanying Mitrokhin et al., IROS 2018. Place it as `bags/IROS_Dataset/what_is_background/background.bag`. |
-| `Test_vins` | Recorded sequence with a depth topic. Add your own download link here. |
-| `simulation_3planes` | Simulated sequence. Add your own download link here. |
-| `Drone_Sequence_with_a_Ball` | Add your own download link here. |
-
-Check what a bag contains before running:
-
-```bash
-rosbag info ~/catkin_ws/bags/slider_depth.bag
-```
-
-The bag must contain `/dvs/events` (`dvs_msgs/EventArray`).
-
-## 5. Running
-
-The node reads its dataset-specific camera intrinsics from `bag_ind`. Set it to match the bag you play:
+The dataset contains several event-camera sequences. Other sequences used by the project include:
 
 | `bag_ind` | Sequence |
-|---|---|
+|---:|---|
 | 0 | `slider_depth` |
 | 1 | `slider_far` |
 | 2 | `what_is_background` |
 | 3 | `test_vins` |
 | 4 | `simulation_3planes` |
 
-Any other dataset needs a new intrinsics case in `get_intrinsic_params()` (`utils.cpp`). Otherwise default 240×180 intrinsics are used.
-
-### Option A: launch file (recommended)
+Check a bag before running:
 
 ```bash
-source ~/catkin_ws/devel/setup.bash
+rosbag info bags/slider_depth.bag
+```
+
+The event stream should contain:
+
+```text
+/dvs/events
+```
+
+with message type:
+
+```text
+dvs_msgs/EventArray
+```
+
+---
+
+## 4. Run the Docker Container
+
+Because the project uses `rqt_gui` and OpenCV visualization windows, X11 forwarding is required on Linux.
+
+First allow the Docker container to access the display:
+
+```bash
+xhost +local:docker
+```
+
+Then start the container from the repository root:
+
+```bash
+docker run --rm -it \
+  --network host \
+  -e DISPLAY=$DISPLAY \
+  -e QT_X11_NO_MITSHM=1 \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v "$(pwd):/catkin_ws/src/fast_dynamic" \
+  -v "$(pwd)/bags:/catkin_ws/bags" \
+  fast_dynamic:noetic
+```
+
+The volume mounts provide:
+
+```text
+Host                              Container
+────────────────────────────────────────────────────
+./                                /catkin_ws/src/fast_dynamic
+./bags                            /catkin_ws/bags
+```
+
+This means that changes made to the source code or launch files on the host are immediately visible inside the container.
+
+---
+
+## 5. Build the ROS Workspace
+
+The project source code is mounted into the container, so the workspace needs to be built after starting the container.
+
+Inside the container:
+
+```bash
+cd /catkin_ws
+
+catkin_make -DCMAKE_BUILD_TYPE=Release \
+  -DCATKIN_BLACKLIST_PACKAGES="davis_ros_driver;dvs_ros_driver;dvxplorer_ros_driver;dvs_calibration;dvs_calibration_gui;dvs_file_writer"
+```
+
+Then source the workspace:
+
+```bash
+source devel/setup.bash
+```
+
+### Why are some packages blacklisted?
+
+`rpg_dvs_ros` contains several hardware driver packages that require additional hardware-specific dependencies such as `libcaer`.
+
+This project replays recorded ROS bags instead of connecting directly to a DAVIS/DVS camera, so these hardware drivers are not required.
+
+The required packages, including `dvs_msgs` and `dvs_renderer`, are still built.
+
+---
+
+## 6. Configure the Launch File
+
+The main launch file is:
+
+```text
+launch/motion_compensate.launch
+```
+
+Before the first run, configure the following items.
+
+### 6.1 Bag path
+
+The bag is mounted inside the container at:
+
+```text
+/catkin_ws/bags/
+```
+
+For example:
+
+```xml
+<arg name="bag_args"
+     default="/catkin_ws/bags/slider_depth.bag"/>
+```
+
+The `rosbag play` node should also use the corresponding path:
+
+```xml
+<node pkg="rosbag"
+      type="play"
+      name="player"
+      args="-r 0.1 -d 1.0 -s 0. /catkin_ws/bags/slider_depth.bag"
+      output="screen"/>
+```
+
+Adjust the filename according to the dataset you want to use.
+
+### 6.2 Dataset index
+
+Set:
+
+```xml
+<param name="bag_ind" value="0"/>
+```
+
+according to the sequence:
+
+| `bag_ind` | Sequence |
+|---:|---|
+| 0 | `slider_depth` |
+| 1 | `slider_far` |
+| 2 | `what_is_background` |
+| 3 | `test_vins` |
+| 4 | `simulation_3planes` |
+
+The value selects the corresponding camera intrinsics in `get_intrinsic_params()`.
+
+---
+
+## 7. Run the Project
+
+After building and sourcing the workspace:
+
+```bash
 roslaunch fast_dynamic motion_compensate.launch
 ```
 
-The launch file starts `roscore` automatically and launches:
+The launch file starts:
 
-- `rosbag play` (currently with a hardcoded path and `-r 0.1`)
-- the `fast_dynamic` node with all parameters and the `events` → `/dvs/events` remap
-- `rqt_gui` with `motion_compensate.perspective`
-- an event viewer node for the raw event view
+- ROS core
+- `rosbag play`
+- `fast_dynamic`
+- event rendering
+- `rqt_gui`
 
-**Before the first run, edit `launch/motion_compensate.launch`:**
+The typical processing flow is:
 
-0. The viewer node is declared as `pkg="dvs_displayer" type="dvs_displayer"`, which no longer exists in `rpg_dvs_ros` (it was renamed `dvs_renderer`). Change it to `pkg="dvs_renderer" type="dvs_renderer"` and replace the `event_image` remap with `<remap from="dvs_rendering" to="event_image" />` so the rqt perspective (which reads `/event_image`) keeps working.
+```text
+ROS Bag
+   ↓
+/dvs/events
+   ↓
+Event Processing
+   ↓
+Motion Estimation
+   ↓
+Event Warping
+   ↓
+Motion-Compensated Event Representation
+   ↓
+Moving Object Detection
+```
 
-1. Change the bag path in the `rosbag play` node (`args="-r 0.1 -d 1.0 -s 0. <PATH_TO_BAG>"`).
-2. Set `bag_ind` to the matching value from the table above.
-3. If `enable_depth` is `true`, set the `bag_args` parameter to the same bag path (see Depth below).
+---
 
-### Option B: manual start
+## 8. Manual Run
+
+For debugging, the components can also be started separately.
+
+### Terminal 1
 
 ```bash
-# terminal 1
 roscore
-
-# terminal 2
-source ~/catkin_ws/devel/setup.bash
-rosrun fast_dynamic fast_dynamic events:=/dvs/events _bag_ind:=0
-
-# terminal 3
-rosbag play ~/catkin_ws/bags/slider_depth.bag
 ```
 
-The `events:=/dvs/events` remap is required: the node subscribes to the relative topic name `events`, so without it no events arrive. Parameters not passed on the command line use the defaults from `motion_compensate.cpp`.
+### Terminal 2
 
-### Topics
+```bash
+source /catkin_ws/devel/setup.bash
 
-Input:
+rosrun fast_dynamic fast_dynamic \
+  events:=/dvs/events \
+  _bag_ind:=0
+```
+
+The `events:=/dvs/events` remap is important because the node subscribes to the relative topic name `events`.
+
+### Terminal 3
+
+```bash
+rosbag play /catkin_ws/bags/slider_depth.bag
+```
+
+This is useful for debugging topic connections independently of the launch file.
+
+---
+
+## 9. Topics
+
+### Input
+
+Event stream:
 
 ```text
-/dvs/events          (dvs_msgs/EventArray)
+/dvs/events
 ```
 
-Optional depth input (only when `enable_depth` is `true`):
+Message type:
 
 ```text
-/camera/depth/image_rect_raw   (when bag_ind = 3, test_vins)
-/dvs/depthmap                  (all other bag_ind values)
+dvs_msgs/EventArray
 ```
 
-Depth mode scans the bag file itself to count messages and waits until all events and depth images have been received before processing. The `bag_args` parameter must therefore contain the real bag path and must refer to the same bag that is played.
+### Optional depth input
 
-Output images (`image_transport`):
+When `enable_depth` is enabled:
 
 ```text
-event_count, avg_time_map, mc_event_count, mc_time_map, mask, depth_map
+/camera/depth/image_rect_raw
 ```
 
-View them with `rqt_image_view` or the provided rqt perspective.
+is used for `bag_ind = 3` (`test_vins`), while:
 
-### Launch parameters
+```text
+/dvs/depthmap
+```
+
+is used for the other supported sequences.
+
+Depth mode also requires `bag_args` to point to the same bag being played.
+
+### Output
+
+The project publishes several image topics through `image_transport`:
+
+```text
+event_count
+avg_time_map
+mc_event_count
+mc_time_map
+mask
+depth_map
+```
+
+These can be visualized using `rqt_image_view` or the provided RQT perspective.
+
+---
+
+## 10. Launch Parameters
 
 | Parameter | Meaning |
 |---|---|
 | `num_events_map_update` | Event batch size per map update |
-| `optimize_image_type` | `0` TimeMap, `1` EventCount |
-| `contrast_ind` | `0` norm, `1` variance, `2` gradient magnitude |
-| `lr_x`, `lr_y`, `lr_div`, `lr_rot` | Learning rates (translation, divergence/scale, rotation) |
-| `use_adam` | Use Adam instead of plain gradient steps |
+| `optimize_image_type` | `0`: TimeMap, `1`: EventCount |
+| `contrast_ind` | `0`: norm, `1`: variance, `2`: gradient magnitude |
+| `lr_x`, `lr_y`, `lr_div`, `lr_rot` | Learning rates for translation, divergence/scale and rotation |
 | `tm_max_iter` | Maximum optimization iterations |
 | `filter_threshold` | Threshold for the moving-object mask |
 | `filter_small_compo` | Keep only the largest valid foreground component |
 | `better_initial`, `random_initial` | Initialization options |
-| `enable_depth` | Use depth information |
+| `enable_depth` | Enable depth information |
 | `depth_x_bin_num`, `depth_y_bin_num` | Depth patch grid size |
-| `enable_undistort` | Undistort events with the camera calibration |
-| `plot_hist` | Show a histogram window (blocks until a key is pressed) |
-| `bag_ind` | Selects the camera intrinsics (see table above) |
-| `bag_args` | Bag path and options, used only in depth mode |
+| `enable_undistort` | Undistort events using camera calibration |
+| `plot_hist` | Display a histogram window |
+| `bag_ind` | Select camera intrinsics for the dataset |
+| `bag_args` | Bag path and options used in depth mode |
 
-> **Note:** The motion model (4-DoF vs. 6-DoF pipeline) is not a launch parameter. It is selected in `checkAndProcess()` in `motion_compensate.cpp` by calling `processMessages()` or `processMessages_v2()`. Rebuild after changing it.
+> **Note:** The motion model is not selected through a launch parameter. The 4-DoF/6-DoF processing path is selected in `checkAndProcess()` in `motion_compensate.cpp` through `processMessages()` or `processMessages_v2()`. Rebuild the workspace after changing this code.
 
-## 6. Example
+---
 
-The project includes experiments on several event-camera sequences:
+## 11. Development Workflow
 
-- `Slider_Far`
-- `Slider_Depth`
-- `What_is_Background`
-- `Drone_Sequence_with_a_Ball`
-- `Test_vins`
+The Docker setup is designed for iterative development.
 
-A typical processing flow is:
+### Modify a launch file
+
+Modify the file on the host:
 
 ```text
-ROS Bag
-  ↓
-Event Stream
-  ↓
-Event Processing
-  ↓
-Motion Estimation
-  ↓
-Event Warping
-  ↓
-Motion-Compensated Event Representation
-  ↓
-Moving Object Detection
+launch/motion_compensate.launch
 ```
 
-## 7. Results & Visualization
+Then restart:
 
-Example Time Surface results:
+```bash
+roslaunch fast_dynamic motion_compensate.launch
+```
+
+No Docker rebuild is required.
+
+### Modify C++ source code
+
+After changing files under:
+
+```text
+src/
+include/
+```
+
+rebuild inside the container:
+
+```bash
+cd /catkin_ws
+
+catkin_make -DCMAKE_BUILD_TYPE=Release \
+  -DCATKIN_BLACKLIST_PACKAGES="davis_ros_driver;dvs_ros_driver;dvxplorer_ros_driver;dvs_calibration;dvs_calibration_gui;dvs_file_writer"
+
+source devel/setup.bash
+```
+
+Then run:
+
+```bash
+roslaunch fast_dynamic motion_compensate.launch
+```
+
+### When is `docker build` required?
+
+Only rebuild the Docker image when changing the environment, for example:
+
+- Dockerfile
+- system packages
+- ROS dependencies
+- `autodiff`
+- `cnpy`
+- third-party ROS dependencies
+
+Normal source-code and launch-file changes do not require rebuilding the image.
+
+---
+
+## 12. Results & Visualization
+
+Example 2-DoF results:
 
 ![2-DoF Time Surface](figures/2dof/test_vins_slice10_ts_mag.png)
+
+Example 4-DoF results:
 
 ![4-DoF Time Surface](figures/4dof/test_vins_slice10_ts_mag.png)
 
 Example 6-DoF results:
-
-![6-DoF Time Map](figures/6dof/tv_gt_time_map.png)
 
 ![6-DoF Event Count](figures/6dof/tv_gt_event_count.png)
 
@@ -344,30 +475,18 @@ Moving-object detection example:
 
 ![6-DoF Detection](figures/6dof/tv_gt_detect.png)
 
-Additional visualizations are available under:
-
-```text
-figures/
-├── 2dof/
-├── 4dof/
-├── 6dof/
-└── motion_seg/
-```
 
 The results demonstrate how motion compensation can align background events and provide a better representation for subsequent moving-object detection.
 
-## 8. Key Takeaways
+---
 
-- Event-based computer vision
-- Camera motion estimation and compensation
-- Multi-DoF motion models
-- Depth-aware event processing
-- Numerical optimization
-- ROS-based perception
-- Event-stream processing
-- Moving-object detection
+## Attribution
 
-## 9. Citation
+The **moving-object detection component** of this project was developed by **Jiaming Li**.
+
+---
+
+## 13. Citation
 
 If you use this project or its related methods, please also cite:
 
@@ -389,5 +508,3 @@ If you use this project or its related methods, please also cite:
   year={2017}
 }
 ```
-
-The project also builds upon the event-camera datasets and methods referenced in the accompanying report.

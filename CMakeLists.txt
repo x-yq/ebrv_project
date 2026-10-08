@@ -280,15 +280,17 @@ target_link_libraries(${PROJECT_NAME}
    ${GSL_LIBRARIES}
 )
 
-# # Add the include directory for cnpy
-include_directories(/home/x-yq/catkin_ws/src/cnpy)
+# cnpy
+if(NOT DEFINED ENV{CNPY_DIR})
+  message(FATAL_ERROR "CNPY_DIR environment variable is not set.")
+endif()
 
-# If the library is installed in a non-standard directory, add the library path
-link_directories(/home/x-yq/catkin_ws/src/cnpy/build)
+set(CNPY_DIR $ENV{CNPY_DIR})
 
-# Link your project with the cnpy library
+include_directories(${CNPY_DIR})
+link_directories(${CNPY_DIR}/build)
+
 target_link_libraries(${PROJECT_NAME} cnpy)
-
 
 cs_install()
 cs_export()
